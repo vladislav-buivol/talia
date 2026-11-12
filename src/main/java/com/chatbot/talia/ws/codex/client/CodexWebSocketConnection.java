@@ -1,30 +1,34 @@
 package com.chatbot.talia.ws.codex.client;
 
-import org.springframework.context.annotation.Profile;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 
-
-public class CodexWebSocketConnection {
+//todo add logging
+public class CodexWebSocketConnection implements AutoCloseable {
     private final URI serverAddress;
     private final WebSocket.Listener listener;
-    private WebSocket webSocket;
+    private final HttpClient httpClient;
+
+    private final ExecutorService sender = Executors.newSingleThreadExecutor(
+            Thread.ofVirtual().name("codex-sender").factory()
+    );
+    private volatile WebSocket webSocket;
 
     public CodexWebSocketConnection(URI serverAddress, WebSocket.Listener listener) {
         this.serverAddress = serverAddress;
         this.listener = listener;
+        this.httpClient = HttpClient.newHttpClient();
     }
 
-    public WebSocket open() throws ExecutionException, InterruptedException, TimeoutException {
-        HttpClient httpClient = HttpClient.newHttpClient();
+    public synchronized WebSocket open() throws ExecutionException, InterruptedException, TimeoutException {
+        if (webSocket != null) {
+            throw new IllegalStateException("Connection is already open");
+        }
         webSocket = httpClient
                 .newWebSocketBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
@@ -34,13 +38,23 @@ public class CodexWebSocketConnection {
     }
 
 
-    public void ping(String message) {
+    public CompletableFuture<WebSocket> ping(String message) {
         ByteBuffer payload = createPingPayloadFromString(message);
-        webSocket.sendPing(payload);
+        return webSocket.sendPing(payload);
     }
 
-    public void send(CharSequence request) {
-        webSocket.sendText(request, true);
+    //todo have a look why return type is a CompletableFuture<Void>
+    public CompletableFuture<Void> send(String message) {
+        CompletableFuture<Void> result = new CompletableFuture<>();
+
+        try {
+            System.out.println("OUT: " + message);
+            sender.execute(new SendTask(message, result, webSocket));
+        } catch (RejectedExecutionException error) {
+            result.completeExceptionally(error);
+        }
+
+        return result;
     }
 
     public ByteBuffer createPingPayloadFromString(String val) {
@@ -55,4 +69,22 @@ public class CodexWebSocketConnection {
     }
 
 
+    @Override
+    public void close() throws Exception {
+        sender.shutdown();
+        try {
+            if (!sender.awaitTermination(10, TimeUnit.SECONDS)) {
+                sender.shutdown();
+            }
+        } catch (InterruptedException e) {
+            sender.shutdown();
+            Thread.currentThread().interrupt();
+        }
+        //todo why it is necessary?
+        WebSocket socket = webSocket;
+        if (socket != null) {
+            socket.abort();
+        }
+        httpClient.shutdown();
+    }
 }
