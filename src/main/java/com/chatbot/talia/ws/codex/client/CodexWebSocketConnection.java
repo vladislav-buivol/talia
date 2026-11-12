@@ -1,5 +1,8 @@
 package com.chatbot.talia.ws.codex.client;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -8,11 +11,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.*;
 
-//todo add logging
 public class CodexWebSocketConnection implements AutoCloseable {
     private final URI serverAddress;
     private final WebSocket.Listener listener;
     private final HttpClient httpClient;
+    private static final Logger log = LoggerFactory.getLogger(CodexWebSocketConnection.class);
+
 
     private final ExecutorService sender = Executors.newSingleThreadExecutor(
             Thread.ofVirtual().name("codex-sender").factory()
@@ -48,7 +52,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         CompletableFuture<Void> result = new CompletableFuture<>();
 
         try {
-            System.out.println("OUT: " + message);
+            log.debug("OUT: {}", message);
             sender.execute(new SendTask(message, result, webSocket));
         } catch (RejectedExecutionException error) {
             result.completeExceptionally(error);

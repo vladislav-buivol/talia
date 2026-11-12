@@ -1,6 +1,9 @@
+
 package com.chatbot.talia.ws.codex.listener;
 
 import com.chatbot.talia.ws.codex.client.CodexWebSocketClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.http.WebSocket;
@@ -9,8 +12,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 
-
 public class CodexWebSocketListener implements WebSocket.Listener {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(CodexWebSocketListener.class);
+
     private CodexWebSocketClient client;
     private final StringBuilder fragments = new StringBuilder();
 
@@ -23,11 +29,11 @@ public class CodexWebSocketListener implements WebSocket.Listener {
 
     @Override
     public void onOpen(WebSocket webSocket) {
+        log.info("Codex WebSocket connection established");
         WebSocket.Listener.super.onOpen(webSocket);
     }
 
     @Override
-    //todo use proper logging instead of System.out.println
     public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
         fragments.append(data);
 
@@ -35,8 +41,8 @@ public class CodexWebSocketListener implements WebSocket.Listener {
             String json = fragments.toString();
             fragments.setLength(0);
 
-            System.out.println("onText: " + json);
-            client.onMessage(json);
+            log.debug("onText: {}", json);
+            client.onTextMessage(json);
         }
 
         return WebSocket.Listener.super.onText(webSocket, data, last);
@@ -44,19 +50,19 @@ public class CodexWebSocketListener implements WebSocket.Listener {
 
     @Override
     public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
-        System.out.println("onBinary");
+        log.debug("onBinary");
         return WebSocket.Listener.super.onBinary(webSocket, data, last);
     }
 
     @Override
     public CompletionStage<?> onPing(WebSocket webSocket, ByteBuffer message) {
-        System.out.println("onPing: " + convertToString(message));
+        log.debug("onPing: {}", convertToString(message));
         return WebSocket.Listener.super.onPing(webSocket, message);
     }
 
     @Override
     public CompletionStage<?> onPong(WebSocket webSocket, ByteBuffer message) {
-        System.out.println("onPong: " + convertToString(message));
+        log.debug("onPong: {}", convertToString(message));
         return WebSocket.Listener.super.onPong(webSocket, message);
     }
 
@@ -65,20 +71,21 @@ public class CodexWebSocketListener implements WebSocket.Listener {
         IOException cause = new IOException(
                 "Codex connection closed. Status: " + statusCode
         );
-        System.out.println("onClose");
+
+        log.info("onClose: status={}, reason={}", statusCode, reason);
         client.onConnectionClosed(cause);
+
         return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
     }
 
     @Override
     public void onError(WebSocket webSocket, Throwable error) {
-        System.out.println("onError");
+        log.error("onError", error);
         client.onConnectionClosed(error);
         WebSocket.Listener.super.onError(webSocket, error);
     }
 
     private String convertToString(ByteBuffer message) {
-
         return StandardCharsets.UTF_8.decode(message.duplicate()).toString();
     }
 }

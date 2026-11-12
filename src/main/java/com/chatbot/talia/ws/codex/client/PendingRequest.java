@@ -10,7 +10,7 @@ public record PendingRequest<R extends JsonRpcSuccessResponse<?>>(
         Class<R> responseType,
         CompletableFuture<R> future) {
 
-    void complete(JsonRpcResponse response) {
+    public void complete(JsonRpcResponse response) {
         future.complete(responseType.cast(response));
     }
 

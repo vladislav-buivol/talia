@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.function.LongFunction;
+
 @Component
 public class CodexMessageDecoder {
 
@@ -17,15 +19,29 @@ public class CodexMessageDecoder {
         this.mapper = mapper;
     }
 
-    public JsonNode readMessage(String json) {
+    public JsonRpcResponse readMessage(
+            String json, LongFunction<Class<? extends JsonRpcSuccessResponse<?>>> responseTypeForId) {
         JsonNode message = mapper.readTree(json);
         if (message == null || !message.isObject()) {
             throw new IllegalArgumentException("Expected a JSON object");
         }
-        return message;
+
+        if (message.has("method")) {
+            if (message.has("id")) {
+                return decodeServerRequest(message);
+            }
+            return decodeNotification(message);
+        }
+
+        Long id = readResponseId(message);
+        Class<? extends JsonRpcSuccessResponse<?>> responseType = null;
+        if (id != null) {
+            responseType = responseTypeForId.apply(id);
+        }
+        return decodeResponse(message, id, responseType);
     }
 
-    public Long readResponseId(JsonNode message) {
+    private static Long readResponseId(JsonNode message) {
         if (message.has("method") || !message.has("id")
                 || message.has("result") == message.has("error")) {
             throw new IllegalArgumentException(
@@ -40,24 +56,23 @@ public class CodexMessageDecoder {
         return readLong(id, "Response ID");
     }
 
-    public JsonRpcResponse decodeResponse(
+    private JsonRpcResponse decodeResponse(
             JsonNode message,
+            Long id,
             Class<? extends JsonRpcSuccessResponse<?>> expectedType
     ) {
-        Long id = readResponseId(message);
-
         if (message.has("error")) {
             return new ErrorResponse(id, readError(message.get("error")));
         }
 
         if (expectedType == null) {
-            throw new IllegalArgumentException("No response class registered for ID " + id);
+            return new UnmatchedResponse(id);
         }
 
         return mapper.treeToValue(message, expectedType);
     }
 
-    public Notification decodeNotification(JsonNode message) {
+    private static Notification decodeNotification(JsonNode message) {
         if (message.has("id")) {
             throw new IllegalArgumentException("A notification cannot contain an id");
         }
@@ -71,7 +86,7 @@ public class CodexMessageDecoder {
         );
     }
 
-    public ServerRequest decodeServerRequest(JsonNode message) {
+    private static ServerRequest decodeServerRequest(JsonNode message) {
         String method = readMethod(message);
         JsonNode id = message.get("id");
 
@@ -119,6 +134,14 @@ public class CodexMessageDecoder {
         );
     }
 
+    private record UnmatchedResponse(Long id) implements JsonRpcResponse {
+
+        @Override
+        public Long getId() {
+            return id;
+        }
+    }
+
     public record ErrorResponse(Long id, JsonRpcError error)
             implements JsonRpcErrorResponse {
 
@@ -135,13 +158,26 @@ public class CodexMessageDecoder {
 
     public record Notification(
             NotificationMethod method, String wireMethod, JsonNode params, JsonNode raw
-    ) {
+    ) implements JsonRpcResponse {
+
+        @Override
+        public Long getId() {
+            return null;
+        }
     }
 
     public record ServerRequest(
             RequestId id, ServerRequestMethod method, String wireMethod,
             JsonNode params, JsonNode raw
-    ) {
+    ) implements JsonRpcResponse {
+
+        @Override
+        public Long getId() {
+            if (id instanceof NumericRequestId numericId) {
+                return numericId.value();
+            }
+            return null;
+        }
     }
 
     public sealed interface RequestId permits NumericRequestId, StringRequestId {
