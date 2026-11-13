@@ -1,14 +1,10 @@
 package com.chatbot.talia.ws.codex.client;
 
 import com.chatbot.talia.ws.codex.listener.CodexWebSocketListener;
-import com.chatbot.talia.ws.codex.protocol.JsonConverter;
-import com.chatbot.talia.ws.codex.protocol.handler.CodexNotificationHandler;
-import com.chatbot.talia.ws.codex.protocol.handler.CodexResponseHandler;
-import com.chatbot.talia.ws.codex.protocol.handler.CodexServerRequestHandler;
-import com.chatbot.talia.ws.codex.protocol.handler.MessageHandler;
+import com.chatbot.talia.ws.codex.protocol.CodexMessageCodec;
+import com.chatbot.talia.ws.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.codex.protocol.request.*;
 import com.chatbot.talia.ws.codex.protocol.response.*;
-import com.chatbot.talia.ws.codex.protocol.response.decoder.CodexMessageDecoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,34 +22,17 @@ import java.util.concurrent.*;
 @Profile("codex")
 public class CodexWebSocketClient implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CodexWebSocketClient.class);
-    private final JsonConverter jsonConverter;
-    private final CodexMessageDecoder decoder;
+    private final CodexMessageCodec messageCodec;
     private final CodexWebSocketConnection connection;
-    private final ConcurrentHashMap<Long, PendingRequest<?>> pendingRequests = new ConcurrentHashMap<>();
-    private final MessageHandler<CodexMessageDecoder.Notification> notificationHandler;
-    private final MessageHandler<CodexMessageDecoder.ServerRequest> serverRequestHandler;
-    private final CodexResponseHandler codexResponseHandler;
+    private final CodexMessageDispatcher dispatcher;
 
     public CodexWebSocketClient(
             @Value("${talia.codex.url:ws://127.0.0.1:4222}") String serverUrl,
-            JsonConverter jsonConverter,
-            CodexMessageDecoder decoder,
-            WebSocket.Listener listener,
-            CodexNotificationHandler notificationHandler,
-            CodexServerRequestHandler serverRequestHandler, CodexResponseHandler codexResponseHandler) {
-        this.jsonConverter = jsonConverter;
-        this.decoder = decoder;
-        this.notificationHandler = notificationHandler;
-        this.serverRequestHandler = serverRequestHandler;
-        this.codexResponseHandler = codexResponseHandler;
-
-        this.connection = new CodexWebSocketConnection(
-                URI.create(serverUrl), listener);
-
-        //todo perhaps add dispatcher to prevent cycle dependencies
-        if (listener instanceof CodexWebSocketListener codexListener) {
-            codexListener.setClient(this);
-        }
+            CodexMessageCodec messageCodec,
+            CodexMessageHandlerRegistry handlerRegistry) {
+        this.messageCodec = messageCodec;
+        this.dispatcher = new CodexMessageDispatcher(messageCodec, handlerRegistry);
+        this.connection = new CodexWebSocketConnection(URI.create(serverUrl), new CodexWebSocketListener(dispatcher));
     }
 
     public void connect() {
@@ -71,13 +50,13 @@ public class CodexWebSocketClient implements AutoCloseable {
         return connection.ping(message);
     }
 
-    public CompletableFuture<InitializeResponse> initialize() {
-        InitializeRequest request = InitializeRequest.create(0L, "talia", "Talia", "0.1.0");
+    public CompletableFuture<InitializeResponse> initialize(long id, String name, String title, String version) {
+        InitializeRequest request = InitializeRequest.create(id, name, title, version);
         return send(request, InitializeResponse.class);
     }
 
     public CompletableFuture<Void> sendNotification(CodexNotification<?> notification) {
-        return connection.send(jsonConverter.toJson(notification));
+        return connection.send(messageCodec.encode(notification));
     }
 
     public <R extends JsonRpcSuccessResponse<?>> CompletableFuture<R> send(CodexRequest<?> request, Class<R> responseType) {
@@ -92,15 +71,13 @@ public class CodexWebSocketClient implements AutoCloseable {
         CompletableFuture<R> future = new CompletableFuture<>();
         PendingRequest<R> pending = new PendingRequest<>(responseType, future);
 
-        if (pendingRequests.putIfAbsent(id, pending) != null) {
+        if (!dispatcher.register(id, pending)) {
             return CompletableFuture.failedFuture(
                     new IllegalArgumentException("Request ID is already pending: " + id)
             );
         }
 
-        future.orTimeout(10, TimeUnit.SECONDS);
-        future.whenComplete((result, error) -> pendingRequests.remove(id, pending));
-        String json = jsonConverter.toJson(request);
+        String json = messageCodec.encode(request);
         connection.send(json).whenComplete((sent, error) -> {
             if (error != null) {
                 future.completeExceptionally(error);
@@ -110,62 +87,6 @@ public class CodexWebSocketClient implements AutoCloseable {
         return future;
     }
 
-    public void onTextMessage(String json) {
-        ResponseLookup lookup = new ResponseLookup();
-        JsonRpcResponse message;
-        try {
-            message = decoder.readMessage(json, lookup::findType);
-        } catch (RuntimeException error) {
-            if (lookup.pending == null) {
-                throw error;
-            }
-            lookup.pending.future().completeExceptionally(error);
-            return;
-        }
-
-        switch (message) {
-            case CodexMessageDecoder.Notification notification -> notificationHandler.handle(notification);
-            case CodexMessageDecoder.ServerRequest request -> serverRequestHandler.handle(request);
-            case JsonRpcResponse response -> completePendingRequest(response, lookup.pending);
-        }
-    }
-
-    //todo investigate why it is different
-    private void completePendingRequest(JsonRpcResponse response, PendingRequest<?> pending) {
-        if (pending == null) {
-            if (response instanceof JsonRpcErrorResponse error) {
-                codexResponseHandler.handle(error);
-            }
-            return;
-        }
-
-        if (response instanceof JsonRpcErrorResponse error) {
-            pending.future().completeExceptionally(
-                    new IllegalStateException(error.getError().message())
-            );
-        } else {
-            pending.complete(response);
-        }
-    }
-
-    private final class ResponseLookup {
-        private PendingRequest<?> pending;
-
-        private Class<? extends JsonRpcSuccessResponse<?>> findType(long id) {
-            pending = pendingRequests.get(id);
-            if (pending == null) {
-                return null;
-            }
-            return pending.responseType();
-        }
-    }
-
-    public void onConnectionClosed(Throwable cause) {
-        for (PendingRequest<?> pending : pendingRequests.values()) {
-            pending.future().completeExceptionally(cause);
-        }
-    }
-
     @Override
     public void close() {
         try {
@@ -173,41 +94,26 @@ public class CodexWebSocketClient implements AutoCloseable {
         } catch (Exception error) {
             throw new IllegalStateException("Failed to close Codex connection", error);
         } finally {
-            onConnectionClosed(new IOException("Codex connection closed"));
+            dispatcher.onConnectionClosed(new IOException("Codex connection closed"));
         }
     }
 
 
     public static void main(String[] args) throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        JsonConverter converter = new JsonConverter(mapper);
-        CodexMessageDecoder decoder = new CodexMessageDecoder(mapper);
+        CodexMessageCodec messageCodec = new CodexMessageCodec(new ObjectMapper());
 
-        CodexMessageReporter reporter = new CodexMessageReporter();
-
-        CodexNotificationHandler notificationHandler =
-                new CodexNotificationHandler(reporter);
-
-        CodexServerRequestHandler serverRequestHandler =
-                new CodexServerRequestHandler(reporter);
-
-        CodexResponseHandler responseHandler =
-                new CodexResponseHandler(reporter);
+        CodexMessageHandlerRegistry handlerRegistry = CodexMessageHandlerRegistry.create(new CodexMessageReporter());
 
         String serverUrl = "ws://127.0.0.1:4222";
 
         try (CodexWebSocketClient client = new CodexWebSocketClient(
                 serverUrl,
-                converter,
-                decoder,
-                new CodexWebSocketListener(),
-                notificationHandler,
-                serverRequestHandler,
-                responseHandler
+                messageCodec,
+                handlerRegistry
         )) {
             client.connect();
 
-            client.initialize().get(10, TimeUnit.SECONDS);
+            client.initialize(0l, "talia", "Tali", "0.1.0").get(10, TimeUnit.SECONDS);
 
             client.sendNotification(InitializedNotification.create())
                     .get(10, TimeUnit.SECONDS);

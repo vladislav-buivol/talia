@@ -1,7 +1,7 @@
 
 package com.chatbot.talia.ws.codex.listener;
 
-import com.chatbot.talia.ws.codex.client.CodexWebSocketClient;
+import com.chatbot.talia.ws.codex.client.CodexMessageDispatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,14 +17,11 @@ public class CodexWebSocketListener implements WebSocket.Listener {
     private static final Logger log =
             LoggerFactory.getLogger(CodexWebSocketListener.class);
 
-    private CodexWebSocketClient client;
+    private final CodexMessageDispatcher dispatcher;
     private final StringBuilder fragments = new StringBuilder();
 
-    public CodexWebSocketListener() {
-    }
-
-    public void setClient(CodexWebSocketClient client) {
-        this.client = Objects.requireNonNull(client);
+    public CodexWebSocketListener(CodexMessageDispatcher dispatcher) {
+        this.dispatcher = Objects.requireNonNull(dispatcher);
     }
 
     @Override
@@ -42,7 +39,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
             fragments.setLength(0);
 
             log.debug("onText: {}", json);
-            client.onTextMessage(json);
+            dispatcher.onTextMessage(json);
         }
 
         return WebSocket.Listener.super.onText(webSocket, data, last);
@@ -73,7 +70,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
         );
 
         log.info("onClose: status={}, reason={}", statusCode, reason);
-        client.onConnectionClosed(cause);
+        dispatcher.onConnectionClosed(cause);
 
         return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
     }
@@ -81,7 +78,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
     @Override
     public void onError(WebSocket webSocket, Throwable error) {
         log.error("onError", error);
-        client.onConnectionClosed(error);
+        dispatcher.onConnectionClosed(error);
         WebSocket.Listener.super.onError(webSocket, error);
     }
 

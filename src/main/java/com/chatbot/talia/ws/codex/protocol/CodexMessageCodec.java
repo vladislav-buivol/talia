@@ -1,9 +1,11 @@
-package com.chatbot.talia.ws.codex.protocol.response.decoder;
+package com.chatbot.talia.ws.codex.protocol;
 
 import com.chatbot.talia.ws.codex.protocol.response.JsonRpcError;
 import com.chatbot.talia.ws.codex.protocol.response.JsonRpcErrorResponse;
 import com.chatbot.talia.ws.codex.protocol.response.JsonRpcResponse;
 import com.chatbot.talia.ws.codex.protocol.response.JsonRpcSuccessResponse;
+import com.chatbot.talia.ws.codex.protocol.response.decoder.NotificationMethod;
+import com.chatbot.talia.ws.codex.protocol.response.decoder.ServerRequestMethod;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -11,15 +13,19 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.function.LongFunction;
 
 @Component
-public class CodexMessageDecoder {
+public class CodexMessageCodec {
 
     private final ObjectMapper mapper;
 
-    public CodexMessageDecoder(ObjectMapper mapper) {
+    public CodexMessageCodec(ObjectMapper mapper) {
         this.mapper = mapper;
     }
 
-    public JsonRpcResponse readMessage(
+    public String encode(Object message) {
+        return mapper.writeValueAsString(message);
+    }
+
+    public JsonRpcResponse decode(
             String json, LongFunction<Class<? extends JsonRpcSuccessResponse<?>>> responseTypeForId) {
         JsonNode message = mapper.readTree(json);
         if (message == null || !message.isObject()) {
@@ -161,6 +167,11 @@ public class CodexMessageDecoder {
     ) implements JsonRpcResponse {
 
         @Override
+        public Type type() {
+            return Type.NOTIFICATION;
+        }
+
+        @Override
         public Long getId() {
             return null;
         }
@@ -170,6 +181,11 @@ public class CodexMessageDecoder {
             RequestId id, ServerRequestMethod method, String wireMethod,
             JsonNode params, JsonNode raw
     ) implements JsonRpcResponse {
+
+        @Override
+        public Type type() {
+            return Type.SERVER_REQUEST;
+        }
 
         @Override
         public Long getId() {

@@ -1,14 +1,14 @@
 package com.chatbot.talia.ws.codex.protocol.handler;
 
 import com.chatbot.talia.ws.codex.client.CodexMessageReporter;
-import com.chatbot.talia.ws.codex.protocol.response.decoder.CodexMessageDecoder;
+import com.chatbot.talia.ws.codex.protocol.CodexMessageCodec;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 @Component
 @Profile("codex")
 public final class CodexNotificationHandler
-        implements MessageHandler<CodexMessageDecoder.Notification> {
+        implements MessageHandler<CodexMessageCodec.Notification> {
 
     private final CodexMessageReporter reporter;
 
@@ -17,7 +17,7 @@ public final class CodexNotificationHandler
     }
 
     @Override
-    public void handle(CodexMessageDecoder.Notification notification) {
+    public void handle(CodexMessageCodec.Notification notification) {
         reporter.reportNotification(notification);
     }
 }
