@@ -5,9 +5,18 @@ import java.util.List;
 
 public record TurnStartRequest(Long id, Params params)
         implements CodexRequest<TurnStartRequest.Params> {
+    public static TurnStartRequest create(String threadId, String text) {
+        return create(null, threadId, text);
+    }
+
 
     public static TurnStartRequest create(Long id, String threadId, String text) {
         return new TurnStartRequest(id, new Params(threadId, List.of(new TextInput(text))));
+    }
+
+    @Override
+    public TurnStartRequest withId(long id) {
+        return new TurnStartRequest(id, params);
     }
 
     @Override

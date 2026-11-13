@@ -11,6 +11,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Consumer;
 
 public class CodexWebSocketListener implements WebSocket.Listener {
 
@@ -18,10 +19,15 @@ public class CodexWebSocketListener implements WebSocket.Listener {
             LoggerFactory.getLogger(CodexWebSocketListener.class);
 
     private final CodexMessageDispatcher dispatcher;
+    private final Consumer<Throwable> onPeerClose;
+    private final Consumer<Throwable> onFailure;
     private final StringBuilder fragments = new StringBuilder();
 
-    public CodexWebSocketListener(CodexMessageDispatcher dispatcher) {
+    public CodexWebSocketListener(CodexMessageDispatcher dispatcher,
+                                  Consumer<Throwable> onPeerClose, Consumer<Throwable> onFailure) {
         this.dispatcher = Objects.requireNonNull(dispatcher);
+        this.onPeerClose = Objects.requireNonNull(onPeerClose);
+        this.onFailure = Objects.requireNonNull(onFailure);
     }
 
     @Override
@@ -70,7 +76,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
         );
 
         log.info("onClose: status={}, reason={}", statusCode, reason);
-        dispatcher.onConnectionClosed(cause);
+        onPeerClose.accept(cause);
 
         return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
     }
@@ -78,7 +84,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
     @Override
     public void onError(WebSocket webSocket, Throwable error) {
         log.error("onError", error);
-        dispatcher.onConnectionClosed(error);
+        onFailure.accept(error);
         WebSocket.Listener.super.onError(webSocket, error);
     }
 

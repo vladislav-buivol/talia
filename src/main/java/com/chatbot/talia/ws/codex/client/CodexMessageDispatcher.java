@@ -5,28 +5,58 @@ import com.chatbot.talia.ws.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.codex.protocol.response.JsonRpcErrorResponse;
 import com.chatbot.talia.ws.codex.protocol.response.JsonRpcResponse;
 import com.chatbot.talia.ws.codex.protocol.response.JsonRpcSuccessResponse;
+import com.chatbot.talia.ws.codex.protocol.response.decoder.NotificationMethod;
 
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class CodexMessageDispatcher {
     private final CodexMessageCodec messageCodec;
     private final CodexMessageHandlerRegistry handlerRegistry;
     private final ConcurrentHashMap<Long, PendingRequest<?>> pendingRequests = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CodexTurn> turns = new ConcurrentHashMap<>();
+    private final AtomicReference<Throwable> closeCause = new AtomicReference<>();
 
     CodexMessageDispatcher(CodexMessageCodec messageCodec, CodexMessageHandlerRegistry handlerRegistry) {
         this.messageCodec = messageCodec;
         this.handlerRegistry = handlerRegistry;
     }
 
-    boolean register(long id, PendingRequest<?> pending) {
-        if (pendingRequests.putIfAbsent(id, pending) != null) {
+    void register(long id, PendingRequest<?> pending) {
+        pendingRequests.put(id, pending);
+        pending.future().orTimeout(10, TimeUnit.SECONDS);
+        pending.future().whenComplete((result, error) -> pendingRequests.remove(id, pending));
+        Throwable cause = closeCause();
+        if (cause != null) {
+            pending.future().completeExceptionally(cause);
+        }
+    }
+
+    boolean registerTurn(String threadId, CodexTurn turn) {
+        CodexTurn registered = turns.compute(threadId, (id, current) ->
+                current == null || current.result().isDone() ? turn : current);
+        if (registered != turn) {
             return false;
         }
 
-        pending.future().orTimeout(10, TimeUnit.SECONDS);
-        pending.future().whenComplete((result, error) -> pendingRequests.remove(id, pending));
+        turn.result().whenComplete((result, error) -> turns.remove(threadId, turn));
+        Throwable cause = closeCause();
+        if (cause != null) {
+            turn.result().completeExceptionally(cause);
+        }
         return true;
+    }
+
+    CodexTurn trackedTurn(String threadId) {
+        return turns.get(threadId);
+    }
+
+    void stopTrackingTurn(String threadId, CodexTurn turn) {
+        if (turn != null && turns.remove(threadId, turn)) {
+            turn.result().completeExceptionally(new CancellationException("Finished conversation " + threadId));
+        }
     }
 
     public void onTextMessage(String json) {
@@ -47,13 +77,42 @@ public final class CodexMessageDispatcher {
             return;
         }
 
+        if (message instanceof CodexMessageCodec.Notification notification) {
+            dispatchTurnNotification(notification);
+        }
         handlerRegistry.get(message.type()).handle(message);
     }
 
-    public void onConnectionClosed(Throwable cause) {
+    private void dispatchTurnNotification(CodexMessageCodec.Notification notification) {
+        NotificationMethod method = notification.method();
+        if (method != NotificationMethod.ITEM_AGENT_MESSAGE_DELTA && method != NotificationMethod.TURN_COMPLETED) {
+            return;
+        }
+        if (notification.params() == null || !notification.params().path("threadId").isString()) {
+            return;
+        }
+
+        CodexTurn turn = turns.get(notification.params().path("threadId").asString());
+        if (turn != null) {
+            turn.onNotification(notification);
+        }
+    }
+
+    boolean beginClose(Throwable cause) {
+        return closeCause.compareAndSet(null, cause);
+    }
+
+    void failPendingRequests(Throwable cause) {
         for (PendingRequest<?> pending : pendingRequests.values()) {
             pending.future().completeExceptionally(cause);
         }
+        for (CodexTurn turn : turns.values()) {
+            turn.result().completeExceptionally(cause);
+        }
+    }
+
+    Throwable closeCause() {
+        return closeCause.get();
     }
 
     private void completePendingRequest(JsonRpcResponse response, PendingRequest<?> pending) {

@@ -4,9 +4,18 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record ThreadStartRequest(Long id, Params params)
         implements CodexRequest<ThreadStartRequest.Params> {
+    public static ThreadStartRequest create(CodexModel model) {
+        return create(null, model);
+    }
 
-    public static ThreadStartRequest create(Long id, String model) {
+
+    public static ThreadStartRequest create(Long id, CodexModel model) {
         return new ThreadStartRequest(id, new Params(model));
+    }
+
+    @Override
+    public ThreadStartRequest withId(long id) {
+        return new ThreadStartRequest(id, params);
     }
 
     @Override
@@ -15,6 +24,6 @@ public record ThreadStartRequest(Long id, Params params)
         return CodexMethod.THREAD_START.value();
     }
 
-    public record Params(String model) {
+    public record Params(CodexModel model) {
     }
 }

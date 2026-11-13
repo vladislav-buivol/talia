@@ -14,4 +14,9 @@ public record PendingRequest<R extends JsonRpcSuccessResponse<?>>(
         future.complete(responseType.cast(response));
     }
 
+    void onSendCompleted(Void sent, Throwable error) {
+        if (error != null) {
+            future.completeExceptionally(error);
+        }
+    }
 }

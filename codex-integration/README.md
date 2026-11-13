@@ -9,7 +9,7 @@ This document describes the Codex WebSocket implementation in `src/main/java/com
 | [`CodexWebSocketClient`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexWebSocketClient.java) | Creates the connection and uses the dispatcher to register requests before sending them. |
 | [`CodexWebSocketConnection`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexWebSocketConnection.java) | Opens the outbound WebSocket, queues text sends, sends pings, and owns the sender executor and HTTP client. |
 | [`SendTask`](../src/main/java/com/chatbot/talia/ws/codex/client/SendTask.java) | Sends one text message on the executor and completes a future when the send finishes or fails. |
-| [`CodexWebSocketListener`](../src/main/java/com/chatbot/talia/ws/codex/listener/CodexWebSocketListener.java) | Assembles WebSocket text fragments and forwards complete messages, close events, and errors to its dispatcher. |
+| [`CodexWebSocketListener`](../src/main/java/com/chatbot/talia/ws/codex/listener/CodexWebSocketListener.java) | Assembles WebSocket text fragments for the dispatcher and forwards close and error events to the connection. |
 | [`CodexMessageDispatcher`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexMessageDispatcher.java) | Tracks pending requests for one connection, completes their futures, and routes other messages through the handler registry. |
 | [`CodexMessageCodec`](../src/main/java/com/chatbot/talia/ws/codex/protocol/CodexMessageCodec.java) | Uses Jackson's `ObjectMapper` to encode outgoing messages and decode incoming notifications, server requests, and responses. |
 | [`JsonRpcRequest<P>` and `CodexRequest<P>`](../src/main/java/com/chatbot/talia/ws/codex/protocol/request/JsonRpcRequest.java) | Define the `id`, `method`, and typed `params` exposed by a request. `CodexRequest` extends that interface. |
@@ -22,13 +22,13 @@ There are two different WebSocket connections in the application. `/ws/chat` acc
 
 With the `codex` Spring profile active, Spring constructs `CodexWebSocketClient` with `CodexMessageCodec`, `CodexMessageHandlerRegistry`, and the address from [`application-codex.properties`](../src/main/resources/application-codex.properties). Each client creates its own dispatcher and listener, so callbacks and pending request IDs belong to one connection.
 
-Calling `client.connect()` calls `connection.open()`. The connection uses the JDK `HttpClient` WebSocket builder to start the connection and waits up to five seconds for it to open. The listener's `onOpen()` delegates to the default listener implementation, which requests the first incoming event. A successful WebSocket connection alone does not complete the Codex initialization handshake.
+`client.connectAndInitialize(name, title, version)` opens the WebSocket, sends `initialize`, waits for the reply, and sends `initialized`. Its future completes after the notification is sent. Application requests and notifications fail until the handshake completes. Each client can initialize once.
 
-The standalone `main()` creates and connects a client, performs the initialization handshake, then starts a thread and sends a turn. The try-with-resources block closes the client when `main()` exits.
+The standalone [`CodexWebSocketDemo`](../src/test/java/com/chatbot/talia/ws/codex/client/CodexWebSocketDemo.java) runs from the test source set. After initialization it checks the 10 most recently updated, non-archived conversations for a first user message of `hello from intellij idea`. It resumes the newest exact match or starts a new thread, then sends the demo turn and closes the connection.
 
 ## Building and sending a request
 
-`initialize(id, name, title, version)` builds an `InitializeRequest` and calls `send(request, InitializeResponse.class)`. The request's `method()` returns the string `initialize` using `CodexMethod.INITIALIZE.value()`. Jackson includes that method in the serialized JSON through `@JsonProperty`.
+The handshake builds an `InitializeRequest` with a client-assigned ID. The request's `method()` returns the string `initialize` using `CodexMethod.INITIALIZE.value()`. Jackson includes that method in the serialized JSON through `@JsonProperty`.
 
 The resulting request has this shape:
 
@@ -55,8 +55,9 @@ CodexRequest
     │
     ▼
 CodexWebSocketClient.send()
-    ├─ registers the pending request with CodexMessageDispatcher
+    ├─ copies the request with a fresh ID
     ├─ CodexMessageCodec.encode(request)
+    ├─ registers the pending request with CodexMessageDispatcher
     ▼
 CodexWebSocketConnection.send(json)
     ├─ creates a send future
@@ -67,9 +68,9 @@ CodexWebSocketConnection.send(json)
            └─ socket.sendText(json, true)
 ```
 
-The dispatcher stores each `PendingRequest<?>` by ID in a `ConcurrentHashMap`. `putIfAbsent` rejects an ID already waiting for a response. Each registered future has a ten-second timeout and removes its map entry on completion. The JSON conversion occurs after registration, so an exception during serialization currently leaves the entry until its timeout.
+The client allocates increasing request IDs for the lifetime of the connection. It encodes each request before registration, so encoding failures complete the returned future without creating a pending entry. Each registered future has a ten-second timeout and removes its map entry on completion.
 
-The connection creates a single-thread executor whose worker is a virtual thread. Multiple callers can submit sends, and `SendTask.run()` waits for one `sendText` operation to finish before that worker starts the next task. The executor currently uses an unbounded queue. Ping is sent directly through `sendPing`, outside that text-send queue.
+The connection uses one virtual thread to send text messages in order. It accepts up to 64 queued messages while another send is active. When the queue fills, new text sends fail with `RejectedExecutionException`. Ping is sent directly through `sendPing`.
 
 ## Two futures, two results
 
@@ -98,7 +99,7 @@ An error can be supplied with `answer.completeExceptionally(error)`. In that cas
 
 #### 1. Create a response future — `CodexWebSocketClient`
 
-`send(request, responseType)` wraps the response class and future in a `PendingRequest` and registers it with the dispatcher before sending. `putIfAbsent` prevents two concurrent requests from waiting under the same ID.
+`send(request, responseType)` assigns an ID to a copy of the request and registers the response class and future in a `PendingRequest` before sending. Each call gets a distinct ID, including when callers reuse a request object.
 
 `send` returns this response future to its caller. Returning a pending future gives the caller an object to wait on or attach further work to; it does not wait for Codex by itself.
 
@@ -134,8 +135,8 @@ The dispatcher sets a ten-second deadline and removes the entry when its future 
 A caller can wait like this.
 
 ```java
-CompletableFuture<InitializeResponse> response = client.send(request, InitializeResponse.class);
-InitializeResponse result = response.get(10, TimeUnit.SECONDS);
+CompletableFuture<InitializeResponse> response = client.connectAndInitialize("talia", "Talia", "0.1.0");
+InitializeResponse result = response.get(15, TimeUnit.SECONDS);
 ```
 
 The first line returns a future; the second can block the calling thread. In a WebSocket listener callback, blocking to wait for a reply can prevent the listener from processing the event needed to complete it. Also, a local timeout or cancellation does not establish whether Codex received or executed a request.
@@ -144,12 +145,24 @@ The first line returns a future; the second can block the calling thread. In a W
 
 `CodexWebSocketListener.onText` joins fragments until `last` is `true`, then calls `dispatcher.onTextMessage(json)`. The dispatcher completes matched responses and uses the handler registry for notifications, server-initiated requests, and unmatched responses.
 
-`onClose` and `onError` forward their causes to the dispatcher, which completes pending futures exceptionally. An explicit `client.close()` also fails any requests still pending after the connection closes.
+Shutdown rejects new sends and starts closing the transport before notifying pending callers. `close()` initiates shutdown. `closeAsync()` waits for Java to write the Close frame and release local resources. Codex App Server can end TCP after receiving that frame, so local shutdown completes independently of a reciprocal Close frame. The two-second timeout covers the frame write. A write or cleanup failure completes the close future exceptionally. Create a new client to connect again after shutdown.
 
-## Initialization and the next steps
+## Conversation operations
 
-The Codex handshake is `initialize` request, successful response, then `initialized` notification. The standalone example performs that handshake before starting a thread and sending a turn.
+- `listConversations(limit, cursor)` returns a page of non-archived conversations ordered by most recent update. Pass the response's `nextCursor` for the next page. `listConversations(limit)` starts at the first page.
+- `getConversationHistory(threadId, messageLimit, order)` reads up to the requested number of user and assistant messages. `getConversationHistory(conversationCount, messageLimit, order)` reads histories for the most recently updated conversations. Use `ConversationHistory.Order.OLDEST_FIRST` or `NEWEST_FIRST`.
+- `openConversation(threadId, messageLimit, order)` resumes a conversation and returns its history in the selected order. The history methods wait for server replies, so call them outside WebSocket callbacks.
+- `startConversation(model)` starts a thread with a `CodexModel`. `finishConversation(threadId)` unsubscribes this connection, stops local tracking for the current turn, and preserves the stored conversation.
+- `getAvailableActions(Path.of("target/codex-schema/ClientRequest.json"))` reads the App Server RPC request methods from a Codex-generated schema. Generate it with `codex app-server generate-json-schema --out target/codex-schema` using the same Codex version as the server. The list describes the protocol for that build. Calling a method can still depend on server configuration, session state, and permissions.
 
-Next steps include routing turn events by their IDs and bounding the send queue.
+## Running a turn
 
-The response map and sender queue are the beginning of concurrent request support. They do not yet establish end-to-end thread safety, response routing, or safe reconnection.
+After initialization and `thread/start`, pass the thread ID and text to `runTurn`.
+
+```java
+TurnStartRequest request = TurnStartRequest.create(threadId, "Hello");
+CompletableFuture<CodexTurnResult> turn = client.runTurn(request, System.out::print);
+CodexTurnResult result = turn.get(2, TimeUnit.MINUTES);
+```
+
+The client delivers text deltas on the WebSocket listener thread. Keep the text callback short and avoid waiting for a WebSocket reply inside it. The future carries the final server status and optional error message. A failed or interrupted server turn still has a terminal result. A start error or connection loss completes the future exceptionally. The API tracks one turn per Codex thread at a time. Cancelling the future ends local tracking. Interrupting the server turn requires a separate request.

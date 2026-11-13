@@ -1,26 +1,37 @@
 package com.chatbot.talia.ws.codex.client;
 
 import java.net.http.WebSocket;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 public class SendTask implements Runnable {
     private final String message;
     private final CompletableFuture<Void> result;
     private final WebSocket socket;
+    private final BooleanSupplier requestFinished;
+    private final Consumer<Throwable> onSendTimeout;
 
-    public SendTask(String message, CompletableFuture<Void> result, WebSocket socket) {
+    SendTask(String message, CompletableFuture<Void> result, WebSocket socket,
+             BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout) {
         this.message = message;
         this.result = result;
         this.socket = socket;
+        this.requestFinished = requestFinished;
+        this.onSendTimeout = onSendTimeout;
     }
 
     @Override
     public void run() {
-        if (socket == null) {
-            result.completeExceptionally(new IllegalStateException("Connection is not open"));
+        if (result.isDone()) {
+            return;
+        }
+        if (requestFinished.getAsBoolean()) {
+            result.completeExceptionally(new CancellationException("Request finished before it could be sent"));
             return;
         }
         try {
@@ -29,7 +40,12 @@ public class SendTask implements Runnable {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             result.completeExceptionally(error);
-        } catch (ExecutionException | TimeoutException error) {
+        } catch (ExecutionException error) {
+            result.completeExceptionally(error.getCause());
+        } catch (TimeoutException error) {
+            onSendTimeout.accept(error);
+            result.completeExceptionally(error);
+        } catch (RuntimeException error) {
             result.completeExceptionally(error);
         }
     }

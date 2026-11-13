@@ -1,6 +1,5 @@
 package com.chatbot.talia.ws.codex.config;
 
-import com.chatbot.talia.ws.codex.client.CodexMessageReporter;
 import com.chatbot.talia.ws.codex.handler.CodexChatWebSocketHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,10 +23,5 @@ public class CodexChatWebSocketConfiguration implements WebSocketConfigurer {
     @Bean
     public WebSocketHandler codexChatWebSocketHandler() {
         return new CodexChatWebSocketHandler();
-    }
-
-    @Bean
-    public CodexMessageReporter reporter() {
-        return new CodexMessageReporter();
     }
 }
