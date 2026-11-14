@@ -4,6 +4,28 @@ This document describes the Codex WebSocket implementation in `src/main/java/com
 
 For the client-facing message flow and examples for every action, see [Talia chat WebSocket protocol](protocol.md).
 
+## Chat UI
+
+Start Codex App Server and Talia with the `codex` profile. Then, in a separate
+terminal, run:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Run `npm install` on the first start or after dependencies change. On Windows,
+you can instead run `codex-integration\start-ui.bat` from the project root.
+Open the address shown by Vite (normally http://localhost:5173), check the
+WebSocket URL (default `ws://localhost:8080/ws/chat`), and click **Connect to
+Talia**. See the [frontend README](../frontend/README.md) for prerequisites.
+
+The UI lists and opens chats, shows history and streaming messages, and offers
+reader and writer actions according to the server's current response. It also
+supports model selection, writer transfer, and chat closing or deletion. The
+model dropdown shows models supported by the backend's `CodexModel` enum.
+
 ## The pieces
 
 | Class | Responsibility in the current code |
@@ -26,7 +48,7 @@ For the client-facing message flow and examples for every action, see [Talia cha
 With Talia running under the `codex` profile, connect Postman to `ws://localhost:8080/ws/chat`. Talia returns:
 
 ```json
-{"type":"connected","availableAction":["startNewDialog","getDialogs","continueDialog"]}
+{"type":"connected","availableAction":["startNewDialog","getDialogs","continueDialog","getModels"]}
 ```
 
 Send each command as a WebSocket text frame. Responses carry the event `type`, the client's current `availableAction` list, and optional `data`.
@@ -35,6 +57,7 @@ Send each command as a WebSocket text frame. Responses carry the event `type`, t
 | --- | --- |
 | `{"type":"POST","action":"startNewDialog"}` | Creates a Codex thread and joins as its writer. The optional `model` field selects a model. |
 | `{"type":"GET","action":"getDialogs","limit":10}` | Lists recent dialogs in `data.dialogs` with their IDs, names, previews, and available roles. Pass `data.nextCursor` as `cursor` for the next page. |
+| `{"type":"GET","action":"getModels"}` | Lists model IDs supported by the configured backend. |
 | `{"type":"POST","action":"continueDialog","threadId":"<id>"}` | Selects a dialog and returns the available roles. |
 | `{"type":"POST","action":"connectAsReader"}` or `{"type":"POST","action":"connectAsWriter"}` | Joins the selected dialog. Either command also accepts an explicit `threadId`. The writer role requires a vacant writer slot. |
 | `{"type":"GET","action":"getHistory","limit":20}` | Returns recent messages in chronological order as role and text pairs. Limits range from 1 to 100. `getDialogs` requires a limit and `getHistory` defaults to 50. |

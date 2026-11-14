@@ -7,6 +7,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
 public interface ChatBackend {
+    List<String> models();
+
     boolean supportsModel(String model);
 
     Conversation start(String model) throws InterruptedException, ExecutionException;

@@ -14,6 +14,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         @JsonSubTypes.Type(value = ContinueDialogRequest.class, name = "continueDialog"),
         @JsonSubTypes.Type(value = GetDialogsRequest.class, name = "getDialogs"),
         @JsonSubTypes.Type(value = GetHistoryRequest.class, name = "getHistory"),
+        @JsonSubTypes.Type(value = GetModelsRequest.class, name = "getModels"),
         @JsonSubTypes.Type(value = SendMessageRequest.class, name = "sendMessage"),
         @JsonSubTypes.Type(value = ChangeModelRequest.class, name = "changeModel"),
         @JsonSubTypes.Type(value = CloseChatRequest.class, name = "closeChat"),

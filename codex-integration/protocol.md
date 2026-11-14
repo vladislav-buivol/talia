@@ -30,7 +30,7 @@ Other participants can receive events while a request is in progress. Each event
 Immediately after connecting, the server sends:
 
 ```json
-{"type":"connected","availableAction":["startNewDialog","getDialogs","continueDialog"]}
+{"type":"connected","availableAction":["startNewDialog","getDialogs","continueDialog","getModels"]}
 ```
 
 ## Typical flows
@@ -45,6 +45,21 @@ Immediately after connecting, the server sends:
 
 ## Actions
 
+### getModels
+
+Returns the model IDs supported by the configured backend. For the Codex
+adapter, these are the models currently defined in `CodexModel`; this is not
+a live catalog from Codex App Server. The action is available in the menu and
+inside a chat.
+
+```json
+{"type":"GET","action":"getModels"}
+```
+
+```json
+{"type":"models","availableAction":["startNewDialog","getDialogs","continueDialog","getModels"],"data":{"models":["gpt-5.6-luna","gpt-5.6-sol"]}}
+```
+
 The responses below illustrate one possible state. The actual action list reflects the current client and session.
 
 ### startNewDialog
@@ -56,7 +71,7 @@ Create a thread and join as writer. `model` is optional. If omitted, Codex choos
 ```
 
 ```json
-{"type":"session.joined","availableAction":["getHistory","closeChat","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","clientId":"client-a","writerId":"client-a","turnId":null}}
+{"type":"session.joined","availableAction":["getHistory","closeChat","getModels","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","clientId":"client-a","writerId":"client-a","turnId":null}}
 ```
 
 ### getDialogs
@@ -68,7 +83,7 @@ List recent dialogs. `limit` is required and must be an integer between 1 and 10
 ```
 
 ```json
-{"type":"dialogs","availableAction":["startNewDialog","getDialogs","continueDialog"],"data":{"dialogs":[{"threadId":"thread-1","name":"Example","preview":"Hello","availableAction":["connectAsReader","connectAsWriter","deleteChat"]}],"nextCursor":"next-page"}}
+{"type":"dialogs","availableAction":["startNewDialog","getDialogs","continueDialog","getModels"],"data":{"dialogs":[{"threadId":"thread-1","name":"Example","preview":"Hello","availableAction":["connectAsReader","connectAsWriter","deleteChat"]}],"nextCursor":"next-page"}}
 ```
 
 ```json
@@ -86,7 +101,7 @@ Select an existing dialog by ID. This returns the available connection roles.
 ```
 
 ```json
-{"type":"dialog.selected","availableAction":["startNewDialog","getDialogs","continueDialog","connectAsReader","connectAsWriter","deleteChat"],"data":{"threadId":"thread-1"}}
+{"type":"dialog.selected","availableAction":["startNewDialog","getDialogs","continueDialog","getModels","connectAsReader","connectAsWriter","deleteChat"],"data":{"threadId":"thread-1"}}
 ```
 
 ### connectAsReader
@@ -98,7 +113,7 @@ Join the selected dialog without write access. Alternatively include `threadId` 
 ```
 
 ```json
-{"type":"session.joined","availableAction":["getHistory","closeChat"],"data":{"threadId":"thread-1","clientId":"client-b","writerId":"client-a","turnId":null}}
+{"type":"session.joined","availableAction":["getHistory","closeChat","getModels"],"data":{"threadId":"thread-1","clientId":"client-b","writerId":"client-a","turnId":null}}
 ```
 
 If no writer is present, the reader's available actions include `connectAsWriter`. Existing participants receive `session.updated` with `joinedClientId`.
@@ -112,7 +127,7 @@ Join a selected dialog as writer, or claim the vacant writer role after joining 
 ```
 
 ```json
-{"type":"session.joined","availableAction":["getHistory","closeChat","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","clientId":"client-a","writerId":"client-a","turnId":null}}
+{"type":"session.joined","availableAction":["getHistory","closeChat","getModels","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","clientId":"client-a","writerId":"client-a","turnId":null}}
 ```
 
 When an attached reader claims a vacant writer role, participants receive `writer.changed` instead. A writer slot already occupied produces `writer_unavailable`.
@@ -126,7 +141,7 @@ Read the most recent messages in chronological order. `limit` is optional, defau
 ```
 
 ```json
-{"type":"history","availableAction":["getHistory","closeChat"],"data":{"threadId":"thread-1","messages":[{"role":"USER","text":"Hello"},{"role":"ASSISTANT","text":"Hi!"}]}}
+{"type":"history","availableAction":["getHistory","closeChat","getModels"],"data":{"threadId":"thread-1","messages":[{"role":"USER","text":"Hello"},{"role":"ASSISTANT","text":"Hi!"}]}}
 ```
 
 ### sendMessage
@@ -138,10 +153,10 @@ The writer sends a nonblank message. The resulting `user.text`, `assistant.text.
 ```
 
 ```json
-{"type":"user.text","availableAction":["getHistory","closeChat"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","text":"Hello"}}
-{"type":"assistant.text.delta","availableAction":["getHistory","closeChat"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","text":"Hi"}}
-{"type":"assistant.text.delta","availableAction":["getHistory","closeChat"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","text":"!"}}
-{"type":"assistant.text.done","availableAction":["getHistory","closeChat","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","codexTurnId":"codex-turn-id","status":"completed","errorMessage":null}}
+{"type":"user.text","availableAction":["getHistory","closeChat","getModels"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","text":"Hello"}}
+{"type":"assistant.text.delta","availableAction":["getHistory","closeChat","getModels"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","text":"Hi"}}
+{"type":"assistant.text.delta","availableAction":["getHistory","closeChat","getModels"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","text":"!"}}
+{"type":"assistant.text.done","availableAction":["getHistory","closeChat","getModels","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","turnId":"talia-turn-id","codexTurnId":"codex-turn-id","status":"completed","errorMessage":null}}
 ```
 
 The terminal status comes from Codex. A turn can complete with a failed or interrupted status. A request or connection failure produces an `error` event with code `turn_failed`.
@@ -155,7 +170,7 @@ Select the model for subsequent turns. This action is available to the writer wh
 ```
 
 ```json
-{"type":"model.changed","availableAction":["getHistory","closeChat","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","model":"gpt-5.6-sol"}}
+{"type":"model.changed","availableAction":["getHistory","closeChat","getModels","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete"],"data":{"threadId":"thread-1","model":"gpt-5.6-sol"}}
 ```
 
 ### transferWriter
@@ -167,7 +182,7 @@ The writer transfers access to a connected client. A participant's `clientId` ap
 ```
 
 ```json
-{"type":"writer.changed","availableAction":["getHistory","closeChat","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete","transferWriter"],"data":{"threadId":"thread-1","writerId":"client-b"}}
+{"type":"writer.changed","availableAction":["getHistory","closeChat","getModels","sendMessage","changeModel","finishChat","deleteChat","closeChatAndDelete","finishChatAndDelete","transferWriter"],"data":{"threadId":"thread-1","writerId":"client-b"}}
 ```
 
 The response above is for the new writer. Other participants receive their own action lists. Transfer can occur during a turn, which continues streaming to participants.
@@ -181,7 +196,7 @@ Leave the shared session and return this client to the menu while keeping the We
 ```
 
 ```json
-{"type":"chat.closed","availableAction":["startNewDialog","getDialogs","continueDialog"],"data":{"threadId":"thread-1"}}
+{"type":"chat.closed","availableAction":["startNewDialog","getDialogs","continueDialog","getModels"],"data":{"threadId":"thread-1"}}
 ```
 
 If the writer leaves, remaining participants receive `writer.changed`. If a reader leaves, they receive `session.updated` with `leftClientId`.
@@ -195,7 +210,7 @@ The idle writer ends the shared session. All attached participants return to the
 ```
 
 ```json
-{"type":"chat.finished","availableAction":["startNewDialog","getDialogs","continueDialog"],"data":{"threadId":"thread-1"}}
+{"type":"chat.finished","availableAction":["startNewDialog","getDialogs","continueDialog","getModels"],"data":{"threadId":"thread-1"}}
 ```
 
 ### deleteChat
@@ -209,7 +224,7 @@ Permanently delete a saved dialog. The idle writer can delete the current dialog
 Codex deletes the dialog history and any spawned descendant threads. On success Talia sends `chat.deleted`. If participants are attached, they all return to the menu.
 
 ```json
-{"type":"chat.deleted","availableAction":["startNewDialog","getDialogs","continueDialog"],"data":{"threadId":"thread-1"}}
+{"type":"chat.deleted","availableAction":["startNewDialog","getDialogs","continueDialog","getModels"],"data":{"threadId":"thread-1"}}
 ```
 
 ### closeChatAndDelete
@@ -233,7 +248,7 @@ The idle writer permanently deletes the current dialog and ends the shared sessi
 Errors use the same response envelope. For example, a reader attempting to send a message receives:
 
 ```json
-{"type":"error","availableAction":["getHistory","closeChat"],"data":{"threadId":"thread-1","code":"read_only","message":"Only the current writer can perform this action"}}
+{"type":"error","availableAction":["getHistory","closeChat","getModels"],"data":{"threadId":"thread-1","code":"read_only","message":"Only the current writer can perform this action"}}
 ```
 
 Other error codes include `invalid_request`, `invalid_thread`, `invalid_limit`, `invalid_text`, `invalid_model`, `action_unavailable`, `writer_unavailable`, `unknown_client`, `turn_in_progress`, `history_failed`, `turn_failed`, `delete_failed`, and `codex_unavailable`. Menu-level errors contain a code and message without a thread ID.

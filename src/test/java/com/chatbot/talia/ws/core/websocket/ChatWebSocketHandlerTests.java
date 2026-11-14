@@ -71,6 +71,10 @@ class ChatWebSocketHandlerTests {
             handler.afterConnectionEstablished(reader.socket);
             assertEquals("startNewDialog", writer.nextEvent("connected").path("availableAction").path(0).asString());
             reader.next("connected");
+            writer.send(handler, new GetModelsRequest());
+            JsonNode models = writer.next("models").path("models");
+            assertEquals("gpt-5.6-luna", models.path(0).asString());
+            assertEquals("gpt-5.6-sol", models.path(1).asString());
             handler.handleTextMessage(reader.socket, new TextMessage("""
                     {"type":"POST","action":"getDialogs","limit":2}
                     """));
@@ -86,7 +90,7 @@ class ChatWebSocketHandlerTests {
             assertEquals("Saved chat", dialog.path("name").asString());
             assertEquals(1, dialog.path("availableAction").size());
             reader.send(handler, new ContinueDialogRequest("thread-1"));
-            assertEquals("connectAsReader", reader.nextEvent("dialog.selected").path("availableAction").path(3).asString());
+            assertEquals("connectAsReader", reader.nextEvent("dialog.selected").path("availableAction").path(4).asString());
             reader.send(handler, new ConnectAsWriterRequest());
             assertEquals("writer_unavailable", reader.next("error").path("code").asString());
             reader.send(handler, new ConnectAsReaderRequest());
@@ -95,6 +99,8 @@ class ChatWebSocketHandlerTests {
 
             reader.send(handler, new GetHistoryRequest(50));
             assertEquals("Saved message", reader.next("history").path("messages").path(0).path("text").asString());
+            reader.send(handler, new GetModelsRequest());
+            assertEquals("gpt-5.6-sol", reader.next("models").path("models").path(1).asString());
             reader.send(handler, new SendMessageRequest("Blocked"));
             assertEquals("read_only", reader.next("error").path("code").asString());
             verify(codex, never()).runTurn(eq("thread-1"), eq("Blocked"), any());

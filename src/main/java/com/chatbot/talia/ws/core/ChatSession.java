@@ -164,6 +164,12 @@ final class ChatSession {
         }
     }
 
+    void models(ChatPeer peer, List<String> models) {
+        ObjectNode response = event("models");
+        response.set("models", mapper.valueToTree(models));
+        send(peer, response);
+    }
+
     synchronized void write(ChatPeer peer, String text) {
         if (!canWrite(peer)) {
             return;
@@ -244,7 +250,7 @@ final class ChatSession {
     }
 
     private void send(ChatPeer peer, String type, ObjectNode data) {
-        List<ChatAction> actions = new ArrayList<>(List.of(ChatAction.GET_HISTORY, ChatAction.CLOSE_CHAT));
+        List<ChatAction> actions = new ArrayList<>(List.of(ChatAction.GET_HISTORY, ChatAction.CLOSE_CHAT, ChatAction.GET_MODELS));
         if (writerId == null) {
             actions.add(ChatAction.CONNECT_AS_WRITER);
         } else if (peer.id().equals(writerId)) {

@@ -3,6 +3,8 @@ package com.chatbot.talia.ws.core.websocket;
 import com.chatbot.talia.ws.core.ChatService;
 import com.chatbot.talia.ws.core.protocol.ChatRequest;
 import com.chatbot.talia.ws.core.protocol.ChatResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -16,6 +18,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class ChatWebSocketHandler extends TextWebSocketHandler implements AutoCloseable {
+    private static final Logger log = LoggerFactory.getLogger(ChatWebSocketHandler.class);
     private final ObjectMapper mapper;
     private final ChatService chats;
     private final ConcurrentHashMap<String, SocketSender> senders = new ConcurrentHashMap<>();
@@ -35,6 +38,7 @@ public final class ChatWebSocketHandler extends TextWebSocketHandler implements 
 
     @Override
     protected void handleTextMessage(WebSocketSession socket, TextMessage message) {
+        log.info("[BACKEND] >>> {}", message.getPayload());
         ChatRequest request;
         try {
             JsonNode json = mapper.readTree(message.getPayload());

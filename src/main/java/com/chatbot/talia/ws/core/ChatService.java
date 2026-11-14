@@ -21,7 +21,7 @@ import static com.chatbot.talia.ws.core.protocol.ChatAction.*;
 
 public final class ChatService implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
-    private static final List<ChatAction> MENU = List.of(START_NEW_DIALOG, GET_DIALOGS, CONTINUE_DIALOG);
+    private static final List<ChatAction> MENU = List.of(START_NEW_DIALOG, GET_DIALOGS, CONTINUE_DIALOG, GET_MODELS);
     private final ObjectMapper mapper;
     private final ChatBackend backend;
     private final ConcurrentHashMap<String, ChatSession> chats = new ConcurrentHashMap<>();
@@ -44,6 +44,14 @@ public final class ChatService implements AutoCloseable {
             return;
         }
         ChatSession chat = peer.chat();
+        if (request instanceof GetModelsRequest) {
+            if (chat == null) {
+                peer.send("models", menu(peer), Map.of("models", backend.models()));
+            } else {
+                chat.models(peer, backend.models());
+            }
+            return;
+        }
         if (chat == null) {
             handleMenu(peer, request);
         } else {

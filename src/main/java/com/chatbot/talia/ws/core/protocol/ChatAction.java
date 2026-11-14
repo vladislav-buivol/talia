@@ -7,6 +7,7 @@ public enum ChatAction {
     CONTINUE_DIALOG("continueDialog"),
     GET_DIALOGS("getDialogs"),
     GET_HISTORY("getHistory"),
+    GET_MODELS("getModels"),
     SEND_MESSAGE("sendMessage"),
     CHANGE_MODEL("changeModel"),
     CLOSE_CHAT("closeChat"),

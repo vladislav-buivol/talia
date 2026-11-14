@@ -25,6 +25,15 @@ public final class CodexChatBackend implements ChatBackend {
     }
 
     @Override
+    public List<String> models() {
+        List<String> models = new ArrayList<>();
+        for (CodexModel model : CodexModel.values()) {
+            models.add(model.id());
+        }
+        return List.copyOf(models);
+    }
+
+    @Override
     public boolean supportsModel(String model) {
         return CodexModel.fromId(model) != null;
     }

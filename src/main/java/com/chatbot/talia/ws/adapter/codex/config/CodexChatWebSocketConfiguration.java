@@ -23,21 +23,24 @@ public class CodexChatWebSocketConfiguration implements WebSocketConfigurer {
     private final ObjectMapper mapper;
     private final String serverUrl;
     private final ClientInfo clientInfo;
+    private final String[] allowedOrigins;
 
     public CodexChatWebSocketConfiguration(
             ObjectMapper mapper,
             @Value("${talia.codex.url}") String serverUrl,
             @Value("${talia.codex.client.name}") String clientName,
             @Value("${talia.codex.client.title}") String clientTitle,
-            @Value("${talia.codex.client.version}") String clientVersion) {
+            @Value("${talia.codex.client.version}") String clientVersion,
+            @Value("${talia.chat.allowed-origins}") String[] allowedOrigins) {
         this.mapper = mapper;
         this.serverUrl = serverUrl;
         this.clientInfo = new ClientInfo(clientName, clientTitle, clientVersion);
+        this.allowedOrigins = allowedOrigins;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(chatWebSocketHandler(), CHAT_WS_ENDPOINT);
+        registry.addHandler(chatWebSocketHandler(), CHAT_WS_ENDPOINT).setAllowedOrigins(allowedOrigins);
     }
 
     @Bean
