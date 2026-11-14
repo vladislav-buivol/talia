@@ -103,7 +103,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         if (!result.isDone()) {
             try {
                 sender.execute(new SendTask(message, result, socket, requestFinished, this::abort));
-                log.debug("OUT: {}", message);
+                log.debug("WebSocket text sent: {}", message);
             } catch (RejectedExecutionException error) {
                 result.completeExceptionally(error);
             }

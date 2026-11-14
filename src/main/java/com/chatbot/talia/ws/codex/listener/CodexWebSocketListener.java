@@ -44,7 +44,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
             String json = fragments.toString();
             fragments.setLength(0);
 
-            log.debug("onText: {}", json);
+            log.debug("WebSocket text received: {}", json);
             dispatcher.onTextMessage(json);
         }
 
@@ -53,19 +53,19 @@ public class CodexWebSocketListener implements WebSocket.Listener {
 
     @Override
     public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
-        log.debug("onBinary");
+        log.debug("WebSocket binary received");
         return WebSocket.Listener.super.onBinary(webSocket, data, last);
     }
 
     @Override
     public CompletionStage<?> onPing(WebSocket webSocket, ByteBuffer message) {
-        log.debug("onPing: {}", convertToString(message));
+        log.debug("WebSocket ping: {}", convertToString(message));
         return WebSocket.Listener.super.onPing(webSocket, message);
     }
 
     @Override
     public CompletionStage<?> onPong(WebSocket webSocket, ByteBuffer message) {
-        log.debug("onPong: {}", convertToString(message));
+        log.debug("WebSocket pong: {}", convertToString(message));
         return WebSocket.Listener.super.onPong(webSocket, message);
     }
 
@@ -75,7 +75,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
                 "Codex connection closed. Status: " + statusCode
         );
 
-        log.info("onClose: status={}, reason={}", statusCode, reason);
+        log.info("Codex WebSocket closed: status={}, reason={}", statusCode, reason);
         onPeerClose.accept(cause);
 
         return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
@@ -83,7 +83,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
 
     @Override
     public void onError(WebSocket webSocket, Throwable error) {
-        log.error("onError", error);
+        log.error("Codex WebSocket error", error);
         onFailure.accept(error);
         WebSocket.Listener.super.onError(webSocket, error);
     }

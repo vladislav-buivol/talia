@@ -40,7 +40,7 @@ public final class CodexWebSocketDemo {
     static String openConversation(CodexClient client)
             throws InterruptedException, ExecutionException, TimeoutException {
         CodexClient.ConversationPage recent = client.listConversations(RECENT_CONVERSATIONS).get(10, TimeUnit.SECONDS);
-        log.info("Recent conversations: {}", recent);
+        log.info("Recent conversations: count={}", recent.conversations().size());
         for (CodexClient.ConversationSummary conversation : recent.conversations()) {
             if (MESSAGE.equals(client.getFirstUserText(conversation.id(), HISTORY_PAGE_TIMEOUT))) {
                 String threadId = client.resumeConversation(conversation.id()).get(10, TimeUnit.SECONDS);

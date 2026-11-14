@@ -14,7 +14,19 @@ public final class CodexMessageReporter {
             LoggerFactory.getLogger(CodexMessageReporter.class);
 
     public void reportNotification(CodexMessageCodec.Notification notification) {
-        log.debug("Codex notification received: {}", notification.wireMethod());
+        log.debug("{} Codex notification: method={}, threadId={}, turnId={}, type={}, text={}",
+                switch (notification.params().path("item").path("type").asString()) {
+                    case "userMessage" -> "[USER_MESSAGE " + notification.wireMethod() + "] >>>";
+                    case "agentMessage" -> "[AGENT_MESSAGE " + notification.wireMethod() + "] <<<";
+                    default -> "";
+                },
+                notification.wireMethod(),
+                notification.params().path("threadId").asString(""),
+                notification.params().path("turnId").asString(""),
+                notification.params().path("item").path("type").asString(""),
+                "userMessage".equals(notification.params().path("item").path("type").asString())
+                        ? notification.params().path("item").path("content").path(0).path("text").asString("")
+                        : notification.params().path("item").path("text").asString(""));
     }
 
     public void reportServerRequest(CodexMessageCodec.ServerRequest request) {
