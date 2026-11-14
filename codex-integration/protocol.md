@@ -13,10 +13,10 @@ Send each request as a JSON text frame with a `type` and an `action`. Use `GET` 
 In Java, construct the request for the specific operation. The request object determines its type and action when serialized:
 
 ```java
-ChatRequest dialogs = new ChatRequest.GetDialogsRequest(10);
-ChatRequest reader = new ChatRequest.ConnectAsReaderRequest();
-ChatRequest close = new ChatRequest.CloseChatRequest();
-ChatRequest delete = new ChatRequest.DeleteChatRequest(threadId);
+ChatRequest dialogs = new GetDialogsRequest(10);
+ChatRequest reader = new ConnectAsReaderRequest();
+ChatRequest close = new CloseChatRequest();
+ChatRequest delete = new DeleteChatRequest(threadId);
 ```
 
 Responses and events are JSON text frames with:

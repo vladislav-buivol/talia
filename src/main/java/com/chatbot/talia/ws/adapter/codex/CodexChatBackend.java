@@ -6,7 +6,7 @@ import com.chatbot.talia.ws.adapter.codex.client.ConversationHistory;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest.ClientInfo;
 import com.chatbot.talia.ws.core.ChatBackend;
-import com.chatbot.talia.ws.core.protocol.ChatResponse;
+import com.chatbot.talia.ws.core.protocol.response.ChatMessage;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -84,12 +84,12 @@ public final class CodexChatBackend implements ChatBackend {
         }
 
         @Override
-        public List<ChatResponse.Message> history(int limit) throws InterruptedException, ExecutionException {
+        public List<ChatMessage> history(int limit) throws InterruptedException, ExecutionException {
             ConversationHistory history = initializedClient().getConversationHistory(
                     threadId, limit, ConversationHistory.Order.NEWEST_FIRST);
-            List<ChatResponse.Message> messages = new ArrayList<>();
+            List<ChatMessage> messages = new ArrayList<>();
             for (ConversationHistory.Message message : history.messages().reversed()) {
-                messages.add(new ChatResponse.Message(message.role().name(), message.text()));
+                messages.add(new ChatMessage(message.role().name(), message.text()));
             }
             return messages;
         }

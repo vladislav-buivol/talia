@@ -9,7 +9,7 @@ import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest.Cli
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadDeleteResponse;
 import com.chatbot.talia.ws.core.ChatService;
 import com.chatbot.talia.ws.core.protocol.ChatRequest;
-import com.chatbot.talia.ws.core.protocol.ChatRequest.*;
+import com.chatbot.talia.ws.core.protocol.request.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;

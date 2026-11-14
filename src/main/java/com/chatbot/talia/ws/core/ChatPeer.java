@@ -2,6 +2,7 @@ package com.chatbot.talia.ws.core;
 
 import com.chatbot.talia.ws.core.protocol.ChatAction;
 import com.chatbot.talia.ws.core.protocol.ChatResponse;
+import com.chatbot.talia.ws.core.protocol.response.ChatEvent;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -22,7 +23,7 @@ final class ChatPeer {
     }
 
     void send(String type, List<ChatAction> actions, Object data) {
-        responses.accept(new ChatResponse.Event(type, actions, data));
+        responses.accept(new ChatEvent(type, actions, data));
     }
 
     synchronized ChatSession chat() {

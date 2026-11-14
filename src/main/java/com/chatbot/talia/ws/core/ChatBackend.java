@@ -1,6 +1,6 @@
 package com.chatbot.talia.ws.core;
 
-import com.chatbot.talia.ws.core.protocol.ChatResponse;
+import com.chatbot.talia.ws.core.protocol.response.ChatMessage;
 
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -27,7 +27,7 @@ public interface ChatBackend {
     interface Conversation extends AutoCloseable {
         String threadId();
 
-        List<ChatResponse.Message> history(int limit) throws InterruptedException, ExecutionException;
+        List<ChatMessage> history(int limit) throws InterruptedException, ExecutionException;
 
         TurnResult runTurn(String text, String model, Consumer<String> onText)
                 throws InterruptedException, ExecutionException;

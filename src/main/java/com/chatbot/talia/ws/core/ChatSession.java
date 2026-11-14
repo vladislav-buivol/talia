@@ -1,7 +1,7 @@
 package com.chatbot.talia.ws.core;
 
 import com.chatbot.talia.ws.core.protocol.ChatAction;
-import com.chatbot.talia.ws.core.protocol.ChatResponse;
+import com.chatbot.talia.ws.core.protocol.response.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
@@ -147,7 +147,7 @@ final class ChatSession {
             return;
         }
         try {
-            List<ChatResponse.Message> messages = conversation.history(limit);
+            List<ChatMessage> messages = conversation.history(limit);
             synchronized (this) {
                 if (peers.containsKey(peer.id())) {
                     ObjectNode response = event("history");

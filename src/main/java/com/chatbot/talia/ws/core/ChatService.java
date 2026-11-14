@@ -2,8 +2,10 @@ package com.chatbot.talia.ws.core;
 
 import com.chatbot.talia.ws.core.protocol.ChatAction;
 import com.chatbot.talia.ws.core.protocol.ChatRequest;
-import com.chatbot.talia.ws.core.protocol.ChatRequest.*;
+import com.chatbot.talia.ws.core.protocol.request.*;
 import com.chatbot.talia.ws.core.protocol.ChatResponse;
+import com.chatbot.talia.ws.core.protocol.response.ChatDialog;
+import com.chatbot.talia.ws.core.protocol.response.ChatDialogPage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
@@ -145,11 +147,11 @@ public final class ChatService implements AutoCloseable {
             return;
         }
         ChatBackend.DialogPage page = backend.list(limit, request.cursor());
-        List<ChatResponse.Dialog> dialogs = new ArrayList<>();
+        List<ChatDialog> dialogs = new ArrayList<>();
         for (ChatBackend.Dialog dialog : page.dialogs()) {
-            dialogs.add(new ChatResponse.Dialog(dialog.threadId(), dialog.name(), dialog.preview(), dialogActions(dialog.threadId())));
+            dialogs.add(new ChatDialog(dialog.threadId(), dialog.name(), dialog.preview(), dialogActions(dialog.threadId())));
         }
-        peer.send("dialogs", menu(peer), new ChatResponse.DialogPage(dialogs, page.nextCursor()));
+        peer.send("dialogs", menu(peer), new ChatDialogPage(dialogs, page.nextCursor()));
     }
 
     private List<ChatAction> dialogActions(String threadId) {
