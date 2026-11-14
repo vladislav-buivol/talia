@@ -1,32 +1,58 @@
 # Codex WebSocket communication
 
-This document describes the Codex WebSocket implementation in `src/main/java/com/chatbot/talia/ws/codex`, including how outgoing requests are matched to incoming replies.
+This document describes the Codex WebSocket implementation in `src/main/java/com/chatbot/talia/ws/adapter/codex`, including how outgoing requests are matched to incoming replies.
 
 ## The pieces
 
 | Class | Responsibility in the current code |
 | --- | --- |
-| [`CodexClient`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexClient.java) | Opens a session and provides conversation, history, and turn operations. |
-| [`CodexWebSocketClient`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexWebSocketClient.java) | Owns the RPC session, runs the handshake, and registers typed requests before sending them. |
-| [`CodexRpcSchema`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexRpcSchema.java) | Reads the RPC method catalog from a Codex-generated schema file. |
-| [`CodexWebSocketConnection`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexWebSocketConnection.java) | Opens the outbound WebSocket, queues text sends, sends pings, and owns the sender executor and HTTP client. |
-| [`SendTask`](../src/main/java/com/chatbot/talia/ws/codex/client/SendTask.java) | Sends one text message on the executor and completes a future when the send finishes or fails. |
-| [`CodexWebSocketListener`](../src/main/java/com/chatbot/talia/ws/codex/listener/CodexWebSocketListener.java) | Assembles WebSocket text fragments for the dispatcher and forwards close and error events to the connection. |
-| [`CodexMessageDispatcher`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexMessageDispatcher.java) | Tracks pending requests for one connection, completes their futures, and routes other messages through the handler registry. |
-| [`CodexMessageCodec`](../src/main/java/com/chatbot/talia/ws/codex/protocol/CodexMessageCodec.java) | Uses Jackson's `ObjectMapper` to encode outgoing messages and decode incoming notifications, server requests, and responses. |
-| [`JsonRpcRequest<P>` and `CodexRequest<P>`](../src/main/java/com/chatbot/talia/ws/codex/protocol/request/JsonRpcRequest.java) | Define the `id`, `method`, and typed `params` exposed by a request. `CodexRequest` extends that interface. |
-| [`InitializeRequest`](../src/main/java/com/chatbot/talia/ws/codex/protocol/request/InitializeRequest.java) and [`CodexMethod`](../src/main/java/com/chatbot/talia/ws/codex/protocol/request/CodexMethod.java) | Represent the initialization request and its protocol method name. |
-| [`CodexChatWebSocketConfiguration`](../src/main/java/com/chatbot/talia/ws/codex/config/CodexChatWebSocketConfiguration.java) | Under the `codex` profile, registers the incoming `/ws/chat` handler. |
+| [`CodexClient`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexClient.java) | Opens a session and provides conversation, history, and turn operations. |
+| [`CodexWebSocketClient`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexWebSocketClient.java) | Owns the RPC session, runs the handshake, and registers typed requests before sending them. |
+| [`CodexRpcSchema`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexRpcSchema.java) | Reads the RPC method catalog from a Codex-generated schema file. |
+| [`CodexWebSocketConnection`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexWebSocketConnection.java) | Opens the outbound WebSocket, queues text sends, sends pings, and owns the sender executor and HTTP client. |
+| [`SendTask`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/SendTask.java) | Sends one text message on the executor and completes a future when the send finishes or fails. |
+| [`CodexWebSocketListener`](../src/main/java/com/chatbot/talia/ws/adapter/codex/listener/CodexWebSocketListener.java) | Assembles WebSocket text fragments for the dispatcher and forwards close and error events to the connection. |
+| [`CodexMessageDispatcher`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexMessageDispatcher.java) | Tracks pending requests for one connection, completes their futures, and routes other messages through the handler registry. |
+| [`CodexMessageCodec`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/CodexMessageCodec.java) | Uses Jackson's `ObjectMapper` to encode outgoing messages and decode incoming notifications, server requests, and responses. |
+| [`JsonRpcRequest<P>` and `CodexRequest<P>`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/request/JsonRpcRequest.java) | Define the `id`, `method`, and typed `params` exposed by a request. `CodexRequest` extends that interface. |
+| [`InitializeRequest`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/request/InitializeRequest.java) and [`CodexMethod`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/request/CodexMethod.java) | Represent the initialization request and its protocol method name. |
+| [`CodexChatWebSocketConfiguration`](../src/main/java/com/chatbot/talia/ws/adapter/codex/config/CodexChatWebSocketConfiguration.java) | Under the `codex` profile, registers the incoming `/ws/chat` handler. |
+| [`ChatWebSocketHandler`](../src/main/java/com/chatbot/talia/ws/core/websocket/ChatWebSocketHandler.java) | Reads Talia chat commands and writes responses and streaming events to each socket. |
+| [`ChatService`](../src/main/java/com/chatbot/talia/ws/core/ChatService.java) and [`ChatSession`](../src/main/java/com/chatbot/talia/ws/core/ChatSession.java) | Manage the menu, chat membership, writer ownership, and available actions. |
+| [`CodexChatBackend`](../src/main/java/com/chatbot/talia/ws/adapter/codex/CodexChatBackend.java) | Implements `ChatBackend` with `CodexClient` and manages connections to Codex. |
 
-There are two different WebSocket connections in the application. `/ws/chat` accepts a connection **from** a client such as Postman. `CodexWebSocketConnection` opens a connection **to** the local Codex app server. The current [`CodexChatWebSocketHandler`](../src/main/java/com/chatbot/talia/ws/codex/handler/CodexChatWebSocketHandler.java) prints incoming client messages; it does not yet forward them to Codex.
+With Talia running under the `codex` profile, connect Postman to `ws://localhost:8080/ws/chat`. Talia returns:
+
+```json
+{"type":"connected","availableAction":["startNewDialog","getDialogs","continueDialog"]}
+```
+
+Send each command as a WebSocket text frame. Responses carry the event `type`, the client's current `availableAction` list, and optional `data`.
+
+| Client JSON | Behavior |
+| --- | --- |
+| `{"action":"startNewDialog"}` | Creates a Codex thread and joins as its writer. The optional `model` field selects a model. |
+| `{"action":"getDialogs","limit":10}` | Lists recent dialogs in `data.dialogs` with their IDs, names, previews, and available roles. Pass `data.nextCursor` as `cursor` for the next page. |
+| `{"action":"continueDialog","threadId":"<id>"}` | Selects a dialog and returns the available roles. |
+| `{"action":"connectAsReader"}` or `{"action":"connectAsWriter"}` | Joins the selected dialog. Either command also accepts an explicit `threadId`. The writer role requires a vacant writer slot. |
+| `{"action":"getHistory","limit":20}` | Returns recent messages in chronological order as role and text pairs. For list and history actions, the optional limit ranges from 1 to 100 and defaults to 50. |
+| `{"action":"sendMessage","text":"Hello"}` | Starts a turn as the writer. Participants receive `user.text`, `assistant.text.delta`, and a terminal `assistant.text.done` or `error` with a shared `turnId`. New readers receive subsequent deltas. |
+| `{"action":"changeModel","model":"gpt-5.6-sol"}` | Selects the model for the writer's next turn in the current thread. |
+| `{"action":"transferWriter","clientId":"<reader-client-id>"}` | Transfers write access to a connected reader. The participants receive `writer.changed`, and the current turn continues. |
+| `{"action":"closeChat"}` | Leaves the chat and returns this client to the menu on the same WebSocket. |
+| `{"action":"finishChat"}` | The writer ends the idle shared session and returns all participants to their menus. The Codex thread and its history stay available. |
+
+The `session.joined` event includes `threadId`, `clientId`, `writerId`, and the active `turnId`, if any. When another client joins, the existing participants receive its `joinedClientId` in `session.updated`. When a writer leaves or disconnects, the earliest remaining client becomes the writer. The endpoint is intended for local use. Clients with access to the endpoint and thread ID can join.
 
 ## Opening the outbound connection
 
 With the `codex` Spring profile active, inject `CodexClient`. Spring wires its RPC session using the address from [`application-codex.properties`](../src/main/resources/application-codex.properties). For standalone use, call `CodexClient.create(serverUrl)`. Each session has its own dispatcher, listener, and pending requests.
 
+The chat backend uses `talia.codex.client.name`, `talia.codex.client.title`, and `talia.codex.client.version` for the Codex handshake. Set these properties alongside `talia.codex.url` in the Codex profile.
+
 `client.connect(name, title, version)` opens the WebSocket, sends `initialize`, waits for the reply, and sends `initialized`. Its future completes after the notification is sent. Application requests and notifications fail until the handshake completes. Each client can initialize once.
 
-The standalone [`CodexWebSocketDemo`](../src/test/java/com/chatbot/talia/ws/codex/client/CodexWebSocketDemo.java) runs from the test source set. After initialization it checks the 10 most recently updated, non-archived conversations for a first user message of `hello from intellij idea`. It resumes the newest exact match or starts a new thread, then sends the demo turn and closes the connection.
+The standalone [`CodexWebSocketDemo`](../src/test/java/com/chatbot/talia/ws/adapter/codex/client/CodexWebSocketDemo.java) runs from the test source set. Pass the server URL, client name, client title, and client version as program arguments, for example `ws://127.0.0.1:4222 talia Talia 0.1.0`. After initialization it checks the 10 most recently updated, non-archived conversations for a first user message of `hello from intellij idea`. It resumes the newest exact match or starts a new thread, then sends the demo turn and closes the connection.
 
 ## Building and sending a request
 

@@ -9,5 +9,5 @@
         <appender-ref ref="CONSOLE"/>
     </root>
 
-    <logger name="com.chatbot.talia.ws.codex" level="DEBUG"/>
+    <logger name="com.chatbot.talia.ws.adapter.codex" level="DEBUG"/>
 </configuration>
