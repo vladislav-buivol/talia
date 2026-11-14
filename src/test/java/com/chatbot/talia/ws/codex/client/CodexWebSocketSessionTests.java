@@ -8,9 +8,7 @@ import com.chatbot.talia.ws.codex.protocol.request.InitializedNotification;
 import com.chatbot.talia.ws.codex.protocol.request.ThreadStartRequest;
 import com.chatbot.talia.ws.codex.protocol.request.TurnStartRequest;
 import com.chatbot.talia.ws.codex.protocol.response.InitializeResponse;
-import com.chatbot.talia.ws.codex.protocol.response.ThreadListResponse;
 import com.chatbot.talia.ws.codex.protocol.response.ThreadStartResponse;
-import com.chatbot.talia.ws.codex.protocol.response.ThreadUnsubscribeResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,8 +48,6 @@ class CodexWebSocketSessionTests {
     private int port;
     @Autowired
     private LoopbackServer server;
-    @Autowired
-    private CodexWebSocketClient client;
 
     @Test
     void listsRpcMethodsFromTheCodexSchema(@TempDir Path directory) throws IOException {
@@ -63,10 +59,10 @@ class CodexWebSocketSessionTests {
                   {"properties":{"method":{"const":"thread/resume"}}}
                 ]}
                 """);
-        assertEquals(List.of("thread/resume", "model/list"), client.getAvailableActions(schema));
+        assertEquals(List.of("thread/resume", "model/list"), CodexRpcSchema.getAvailableActions(schema));
 
         Files.writeString(schema, "{\"oneOf\":[{\"properties\":{}}]}");
-        assertThrows(IOException.class, () -> client.getAvailableActions(schema));
+        assertThrows(IOException.class, () -> CodexRpcSchema.getAvailableActions(schema));
     }
 
     @Test
@@ -83,10 +79,11 @@ class CodexWebSocketSessionTests {
         };
         CodexMessageHandlerRegistry registry = CodexMessageHandlerRegistry.create(new CodexMessageReporter());
         String serverUrl = "ws://127.0.0.1:" + port + "/codex-test";
-        try (CodexWebSocketClient client = new CodexWebSocketClient(serverUrl, codec, registry)) {
+        try (CodexClient codex = new CodexClient(new CodexWebSocketClient(serverUrl, codec, registry))) {
+            CodexWebSocketClient client = codex.rpc();
             assertInstanceOf(IllegalStateException.class, startThread(client).exceptionNow());
 
-            CompletableFuture<InitializeResponse> initialized = client.connectAndInitialize("talia", "Talia", "0.1.0");
+            CompletableFuture<Void> initialized = codex.connect("talia", "Talia", "0.1.0");
             JsonNode initialize = server.nextMessage();
             assertEquals("initialize", initialize.path("method").asString());
             assertEquals(0L, initialize.path("id").asLong());
@@ -97,7 +94,7 @@ class CodexWebSocketSessionTests {
 
             WebSocketSession socket = server.session.get(5, TimeUnit.SECONDS);
             socket.sendMessage(new TextMessage("{\"id\":0,\"result\":{}}"));
-            assertEquals(0L, initialized.get(5, TimeUnit.SECONDS).id());
+            initialized.get(5, TimeUnit.SECONDS);
             JsonNode acknowledgement = server.nextMessage();
             assertEquals("initialized", acknowledgement.path("method").asString());
             assertFalse(acknowledgement.has("id"));
@@ -124,12 +121,21 @@ class CodexWebSocketSessionTests {
             assertEquals(3L, secondRequest.path("id").asLong());
             assertNull(threadStart.id());
             exchangeTurn(client, socket);
-            exchangeConversationHistory(client, socket);
+            exchangeConversationHistory(codex, socket);
 
             CompletableFuture<CodexTurnResult> pendingTurn = client.runTurn(
                     TurnStartRequest.create("thread-1", "disconnect"), text -> fail("Unexpected text"));
             assertEquals("turn/start", server.nextMessage().path("method").asString());
-            client.closeAsync().get(5, TimeUnit.SECONDS);
+            CompletableFuture<String> finished = codex.finishConversationAndCloseAsync("thread-2");
+            JsonNode unsubscribe = server.nextMessage();
+            assertEquals("thread/unsubscribe", unsubscribe.path("method").asString());
+            assertEquals("thread-2", unsubscribe.path("params").path("threadId").asString());
+            assertFalse(finished.isDone());
+            assertFalse(server.closed.isDone());
+            socket.sendMessage(new TextMessage("""
+                    {"id":%d,"result":{"status":"unsubscribed"}}
+                    """.formatted(unsubscribe.path("id").asLong())));
+            assertEquals("unsubscribed", finished.get(5, TimeUnit.SECONDS));
             assertEquals(CloseStatus.NORMAL.getCode(), server.closed.get(5, TimeUnit.SECONDS).getCode());
             assertInstanceOf(IOException.class, assertThrows(ExecutionException.class,
                     () -> pending.get(5, TimeUnit.SECONDS)).getCause());
@@ -139,17 +145,17 @@ class CodexWebSocketSessionTests {
         }
     }
 
-    private void exchangeConversationHistory(CodexWebSocketClient client, WebSocketSession socket) throws Exception {
-        CompletableFuture<ThreadListResponse> listed = client.listConversations(2);
+    private void exchangeConversationHistory(CodexClient client, WebSocketSession socket) throws Exception {
+        CompletableFuture<CodexClient.ConversationPage> listed = client.listConversations(2);
         reply(socket, "thread/list", """
                 {"data":[{"id":"thread-1","name":"Demo","preview":"Hello","updatedAt":42}],"nextCursor":"more"}
                 """);
-        assertEquals("Demo", listed.get(5, TimeUnit.SECONDS).result().data().getFirst().name());
-        assertEquals("more", listed.resultNow().result().nextCursor());
+        assertEquals("Demo", listed.get(5, TimeUnit.SECONDS).conversations().getFirst().name());
+        assertEquals("more", listed.resultNow().nextCursor());
 
-        CompletableFuture<ThreadStartResponse> started = client.startConversation(CodexModel.GPT_5_6_LUNA);
+        CompletableFuture<String> started = client.startConversation(CodexModel.GPT_5_6_LUNA);
         reply(socket, "thread/start", "{\"thread\":{\"id\":\"thread-2\"}}");
-        assertEquals("thread-2", started.get(5, TimeUnit.SECONDS).result().thread().id());
+        assertEquals("thread-2", started.get(5, TimeUnit.SECONDS));
 
         try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
             Future<ConversationHistory> opened = executor.submit(() ->
@@ -186,13 +192,12 @@ class CodexWebSocketSessionTests {
             assertTrue(recent.getLast().messages().isEmpty());
         }
 
-        CompletableFuture<CodexTurnResult> active = client.runTurn(
-                TurnStartRequest.create("thread-1", "finish"), System.out::print);
+        CompletableFuture<CodexTurnResult> active = client.runTurn("thread-1", "finish", System.out::print);
         sendTurnReply(socket, server.nextMessage(), "turn-finish");
-        CompletableFuture<ThreadUnsubscribeResponse> finished = client.finishConversation("thread-1");
+        CompletableFuture<String> finished = client.finishConversation("thread-1");
         JsonNode unsubscribe = reply(socket, "thread/unsubscribe", "{\"status\":\"unsubscribed\"}");
         assertEquals("thread-1", unsubscribe.path("params").path("threadId").asString());
-        assertEquals("unsubscribed", finished.get(5, TimeUnit.SECONDS).result().status());
+        assertEquals("unsubscribed", finished.get(5, TimeUnit.SECONDS));
         assertThrows(CancellationException.class, active::join);
     }
 

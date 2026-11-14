@@ -6,7 +6,9 @@ This document describes the Codex WebSocket implementation in `src/main/java/com
 
 | Class | Responsibility in the current code |
 | --- | --- |
-| [`CodexWebSocketClient`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexWebSocketClient.java) | Creates the connection and uses the dispatcher to register requests before sending them. |
+| [`CodexClient`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexClient.java) | Opens a session and provides conversation, history, and turn operations. |
+| [`CodexWebSocketClient`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexWebSocketClient.java) | Owns the RPC session, runs the handshake, and registers typed requests before sending them. |
+| [`CodexRpcSchema`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexRpcSchema.java) | Reads the RPC method catalog from a Codex-generated schema file. |
 | [`CodexWebSocketConnection`](../src/main/java/com/chatbot/talia/ws/codex/client/CodexWebSocketConnection.java) | Opens the outbound WebSocket, queues text sends, sends pings, and owns the sender executor and HTTP client. |
 | [`SendTask`](../src/main/java/com/chatbot/talia/ws/codex/client/SendTask.java) | Sends one text message on the executor and completes a future when the send finishes or fails. |
 | [`CodexWebSocketListener`](../src/main/java/com/chatbot/talia/ws/codex/listener/CodexWebSocketListener.java) | Assembles WebSocket text fragments for the dispatcher and forwards close and error events to the connection. |
@@ -20,9 +22,9 @@ There are two different WebSocket connections in the application. `/ws/chat` acc
 
 ## Opening the outbound connection
 
-With the `codex` Spring profile active, Spring constructs `CodexWebSocketClient` with `CodexMessageCodec`, `CodexMessageHandlerRegistry`, and the address from [`application-codex.properties`](../src/main/resources/application-codex.properties). Each client creates its own dispatcher and listener, so callbacks and pending request IDs belong to one connection.
+With the `codex` Spring profile active, inject `CodexClient`. Spring wires its RPC session using the address from [`application-codex.properties`](../src/main/resources/application-codex.properties). For standalone use, call `CodexClient.create(serverUrl)`. Each session has its own dispatcher, listener, and pending requests.
 
-`client.connectAndInitialize(name, title, version)` opens the WebSocket, sends `initialize`, waits for the reply, and sends `initialized`. Its future completes after the notification is sent. Application requests and notifications fail until the handshake completes. Each client can initialize once.
+`client.connect(name, title, version)` opens the WebSocket, sends `initialize`, waits for the reply, and sends `initialized`. Its future completes after the notification is sent. Application requests and notifications fail until the handshake completes. Each client can initialize once.
 
 The standalone [`CodexWebSocketDemo`](../src/test/java/com/chatbot/talia/ws/codex/client/CodexWebSocketDemo.java) runs from the test source set. After initialization it checks the 10 most recently updated, non-archived conversations for a first user message of `hello from intellij idea`. It resumes the newest exact match or starts a new thread, then sends the demo turn and closes the connection.
 
@@ -48,7 +50,7 @@ The resulting request has this shape:
 
 The Codex app server uses JSON-RPC-style messages without the `jsonrpc` field on the wire. See the [app-server protocol documentation](https://learn.chatgpt.com/docs/app-server#protocol).
 
-`client.send(request, responseType)` follows this path.
+`client.rpc().send(request, responseType)` sends a typed request on the same session used by the conversation API.
 
 ```text
 CodexRequest
@@ -135,11 +137,11 @@ The dispatcher sets a ten-second deadline and removes the entry when its future 
 A caller can wait like this.
 
 ```java
-CompletableFuture<InitializeResponse> response = client.connectAndInitialize("talia", "Talia", "0.1.0");
-InitializeResponse result = response.get(15, TimeUnit.SECONDS);
+CompletableFuture<Void> connected = client.connect("talia", "Talia", "0.1.0");
+connected.get(15, TimeUnit.SECONDS);
 ```
 
-The first line returns a future; the second can block the calling thread. In a WebSocket listener callback, blocking to wait for a reply can prevent the listener from processing the event needed to complete it. Also, a local timeout or cancellation does not establish whether Codex received or executed a request.
+The first line returns a future. The second can block the calling thread. In a WebSocket listener callback, blocking to wait for a reply can prevent the listener from processing the event needed to complete it. A local timeout or cancellation leaves the server outcome unknown.
 
 ## Receiving and matching messages
 
@@ -149,19 +151,19 @@ Shutdown rejects new sends and starts closing the transport before notifying pen
 
 ## Conversation operations
 
-- `listConversations(limit, cursor)` returns a page of non-archived conversations ordered by most recent update. Pass the response's `nextCursor` for the next page. `listConversations(limit)` starts at the first page.
+- `listConversations(limit, cursor)` returns a page of conversation summaries ordered by most recent update. Pass the page's `nextCursor` for the next page. `listConversations(limit)` starts at the first page.
 - `getConversationHistory(threadId, messageLimit, order)` reads up to the requested number of user and assistant messages. `getConversationHistory(conversationCount, messageLimit, order)` reads histories for the most recently updated conversations. Use `ConversationHistory.Order.OLDEST_FIRST` or `NEWEST_FIRST`.
-- `openConversation(threadId, messageLimit, order)` resumes a conversation and returns its history in the selected order. The history methods wait for server replies, so call them outside WebSocket callbacks.
-- `startConversation(model)` starts a thread with a `CodexModel`. `finishConversation(threadId)` unsubscribes this connection, stops local tracking for the current turn, and preserves the stored conversation.
-- `getAvailableActions(Path.of("target/codex-schema/ClientRequest.json"))` reads the App Server RPC request methods from a Codex-generated schema. Generate it with `codex app-server generate-json-schema --out target/codex-schema` using the same Codex version as the server. The list describes the protocol for that build. Calling a method can still depend on server configuration, session state, and permissions.
+- `openConversation(threadId, messageLimit, order)` resumes a conversation and returns its history in the selected order. `resumeConversation(threadId)` returns the resumed ID. The history methods wait for server replies, so call them outside WebSocket callbacks.
+- `startConversation(model)` returns the new thread ID. `finishConversation(threadId)` returns the unsubscribe status, stops local tracking for the current turn, and preserves the stored conversation.
+- `CodexRpcSchema.getAvailableActions(Path.of("target/codex-schema/ClientRequest.json"))` reads the App Server RPC request methods from a Codex-generated schema. Generate it with `codex app-server generate-json-schema --out target/codex-schema` using the same Codex version as the server. The list describes the protocol for that build. Calling a method can still depend on server configuration, session state, and permissions.
 
 ## Running a turn
 
-After initialization and `thread/start`, pass the thread ID and text to `runTurn`.
+After connecting, pass the conversation ID and prompt to `runTurn`.
 
 ```java
-TurnStartRequest request = TurnStartRequest.create(threadId, "Hello");
-CompletableFuture<CodexTurnResult> turn = client.runTurn(request, System.out::print);
+String threadId = client.startConversation(CodexModel.GPT_5_6_LUNA).get();
+CompletableFuture<CodexTurnResult> turn = client.runTurn(threadId, "Hello", System.out::print);
 CodexTurnResult result = turn.get(2, TimeUnit.MINUTES);
 ```
 

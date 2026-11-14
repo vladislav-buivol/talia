@@ -23,7 +23,8 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class CodexWebSocketDemoTests {
-    private final CodexWebSocketClient client = mock(CodexWebSocketClient.class);
+    private final CodexWebSocketClient rpc = mock(CodexWebSocketClient.class);
+    private final CodexClient client = new CodexClient(rpc);
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
@@ -49,14 +50,22 @@ class CodexWebSocketDemoTests {
     @Test
     void resumesTheNewestExactFirstMessageMatch() throws Exception {
         ThreadListResponse recent = mapper.readValue("""
-                {"id":1,"result":{"data":[{"id":"newest"},{"id":"match"},{"id":"older"}],"nextCursor":"next-page"}}
+                {"id":1,"result":{"data":[{"id":"newest"},{"id":"with-image"},{"id":"match"},{"id":"older"}],"nextCursor":"next-page"}}
                 """, ThreadListResponse.class);
-        when(client.send(ThreadListRequest.create(10), ThreadListResponse.class))
+        when(rpc.send(ThreadListRequest.create(10), ThreadListResponse.class))
                 .thenReturn(CompletableFuture.completedFuture(recent));
         stubTurns("newest", null, """
                 {"id":2,"result":{"data":[{"items":[
                   {"type":"userMessage","content":[{"type":"text","text":"hello from intellij idea again"}]},
                   {"type":"userMessage","content":[{"type":"text","text":"hello from intellij idea"}]}
+                ]}],"nextCursor":null}}
+                """);
+        stubTurns("with-image", null, """
+                {"id":2,"result":{"data":[{"items":[
+                  {"type":"userMessage","content":[
+                    {"type":"text","text":"hello from intellij idea"},
+                    {"type":"localImage","path":"image.png"}
+                  ]}
                 ]}],"nextCursor":null}}
                 """);
         stubTurns("match", null, """
@@ -71,11 +80,11 @@ class CodexWebSocketDemoTests {
         ThreadResumeResponse resumed = mapper.readValue("""
                 {"id":5,"result":{"thread":{"id":"match"}}}
                 """, ThreadResumeResponse.class);
-        when(client.send(ThreadResumeRequest.create("match"), ThreadResumeResponse.class))
+        when(rpc.send(ThreadResumeRequest.create("match"), ThreadResumeResponse.class))
                 .thenReturn(CompletableFuture.completedFuture(resumed));
 
         assertEquals("match", CodexWebSocketDemo.openConversation(client));
-        verifyNoMoreInteractions(ignoreStubs(client));
+        verifyNoMoreInteractions(ignoreStubs(rpc));
     }
 
     @Test
@@ -83,7 +92,7 @@ class CodexWebSocketDemoTests {
         ThreadListResponse recent = mapper.readValue("""
                 {"id":1,"result":{"data":[{"id":"different"}],"nextCursor":"next-page"}}
                 """, ThreadListResponse.class);
-        when(client.send(ThreadListRequest.create(10), ThreadListResponse.class))
+        when(rpc.send(ThreadListRequest.create(10), ThreadListResponse.class))
                 .thenReturn(CompletableFuture.completedFuture(recent));
         stubTurns("different", null, """
                 {"id":2,"result":{"data":[{"items":[
@@ -93,16 +102,16 @@ class CodexWebSocketDemoTests {
         ThreadStartResponse started = mapper.readValue("""
                 {"id":3,"result":{"thread":{"id":"new"}}}
                 """, ThreadStartResponse.class);
-        when(client.send(ThreadStartRequest.create(CodexModel.GPT_5_6_LUNA), ThreadStartResponse.class))
+        when(rpc.send(ThreadStartRequest.create(CodexModel.GPT_5_6_LUNA), ThreadStartResponse.class))
                 .thenReturn(CompletableFuture.completedFuture(started));
 
         assertEquals("new", CodexWebSocketDemo.openConversation(client));
-        verifyNoMoreInteractions(ignoreStubs(client));
+        verifyNoMoreInteractions(ignoreStubs(rpc));
     }
 
     private void stubTurns(String threadId, String cursor, String json) {
         ThreadTurnsListResponse turns = mapper.readValue(json, ThreadTurnsListResponse.class);
-        when(client.send(ThreadTurnsListRequest.create(threadId, cursor), ThreadTurnsListResponse.class))
+        when(rpc.send(ThreadTurnsListRequest.create(threadId, cursor), ThreadTurnsListResponse.class))
                 .thenReturn(CompletableFuture.completedFuture(turns));
     }
 }
