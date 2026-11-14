@@ -11,6 +11,9 @@ public enum ChatAction {
     CHANGE_MODEL("changeModel"),
     CLOSE_CHAT("closeChat"),
     FINISH_CHAT("finishChat"),
+    CLOSE_CHAT_AND_DELETE("closeChatAndDelete"),
+    FINISH_CHAT_AND_DELETE("finishChatAndDelete"),
+    DELETE_CHAT("deleteChat"),
     CONNECT_AS_READER("connectAsReader"),
     CONNECT_AS_WRITER("connectAsWriter"),
     TRANSFER_WRITER("transferWriter");

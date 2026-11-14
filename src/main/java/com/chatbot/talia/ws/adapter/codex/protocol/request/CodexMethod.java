@@ -12,6 +12,7 @@ public enum CodexMethod {
     THREAD_TURNS_LIST("thread/turns/list"),
     THREAD_RESUME("thread/resume"),
     THREAD_UNSUBSCRIBE("thread/unsubscribe"),
+    THREAD_DELETE("thread/delete"),
     TURN_START("turn/start");
 
     private final String value;

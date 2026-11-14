@@ -143,6 +143,11 @@ public final class CodexChatBackend implements ChatBackend {
         }
 
         @Override
+        public void delete() throws InterruptedException, ExecutionException {
+            initializedClient().deleteConversation(threadId).get();
+        }
+
+        @Override
         public synchronized void close() {
             closed = true;
             if (client != null) {

@@ -2,6 +2,8 @@
 
 This document describes the Codex WebSocket implementation in `src/main/java/com/chatbot/talia/ws/adapter/codex`, including how outgoing requests are matched to incoming replies.
 
+For the client-facing message flow and examples for every action, see [Talia chat WebSocket protocol](protocol.md).
+
 ## The pieces
 
 | Class | Responsibility in the current code |
@@ -31,16 +33,18 @@ Send each command as a WebSocket text frame. Responses carry the event `type`, t
 
 | Client JSON | Behavior |
 | --- | --- |
-| `{"action":"startNewDialog"}` | Creates a Codex thread and joins as its writer. The optional `model` field selects a model. |
-| `{"action":"getDialogs","limit":10}` | Lists recent dialogs in `data.dialogs` with their IDs, names, previews, and available roles. Pass `data.nextCursor` as `cursor` for the next page. |
-| `{"action":"continueDialog","threadId":"<id>"}` | Selects a dialog and returns the available roles. |
-| `{"action":"connectAsReader"}` or `{"action":"connectAsWriter"}` | Joins the selected dialog. Either command also accepts an explicit `threadId`. The writer role requires a vacant writer slot. |
-| `{"action":"getHistory","limit":20}` | Returns recent messages in chronological order as role and text pairs. For list and history actions, the optional limit ranges from 1 to 100 and defaults to 50. |
-| `{"action":"sendMessage","text":"Hello"}` | Starts a turn as the writer. Participants receive `user.text`, `assistant.text.delta`, and a terminal `assistant.text.done` or `error` with a shared `turnId`. New readers receive subsequent deltas. |
-| `{"action":"changeModel","model":"gpt-5.6-sol"}` | Selects the model for the writer's next turn in the current thread. |
-| `{"action":"transferWriter","clientId":"<reader-client-id>"}` | Transfers write access to a connected reader. The participants receive `writer.changed`, and the current turn continues. |
-| `{"action":"closeChat"}` | Leaves the chat and returns this client to the menu on the same WebSocket. |
-| `{"action":"finishChat"}` | The writer ends the idle shared session and returns all participants to their menus. The Codex thread and its history stay available. |
+| `{"type":"POST","action":"startNewDialog"}` | Creates a Codex thread and joins as its writer. The optional `model` field selects a model. |
+| `{"type":"GET","action":"getDialogs","limit":10}` | Lists recent dialogs in `data.dialogs` with their IDs, names, previews, and available roles. Pass `data.nextCursor` as `cursor` for the next page. |
+| `{"type":"POST","action":"continueDialog","threadId":"<id>"}` | Selects a dialog and returns the available roles. |
+| `{"type":"POST","action":"connectAsReader"}` or `{"type":"POST","action":"connectAsWriter"}` | Joins the selected dialog. Either command also accepts an explicit `threadId`. The writer role requires a vacant writer slot. |
+| `{"type":"GET","action":"getHistory","limit":20}` | Returns recent messages in chronological order as role and text pairs. Limits range from 1 to 100. `getDialogs` requires a limit and `getHistory` defaults to 50. |
+| `{"type":"POST","action":"sendMessage","text":"Hello"}` | Starts a turn as the writer. Participants receive `user.text`, `assistant.text.delta`, and a terminal `assistant.text.done` or `error` with a shared `turnId`. New readers receive subsequent deltas. |
+| `{"type":"POST","action":"changeModel","model":"gpt-5.6-sol"}` | Selects the model for the writer's next turn in the current thread. |
+| `{"type":"POST","action":"transferWriter","clientId":"<reader-client-id>"}` | Transfers write access to a connected reader. The participants receive `writer.changed`, and the current turn continues. |
+| `{"type":"POST","action":"closeChat"}` | Leaves the chat and returns this client to the menu on the same WebSocket. |
+| `{"type":"POST","action":"finishChat"}` | The writer ends the idle shared session and returns all participants to their menus. The Codex thread and its history stay available. |
+| `{"type":"DELETE","action":"deleteChat","threadId":"<id>"}` | Permanently deletes a stored dialog from the menu or as its current idle writer. |
+| `{"type":"DELETE","action":"closeChatAndDelete"}` or `{"type":"DELETE","action":"finishChatAndDelete"}` | The idle writer deletes the current dialog and returns all participants to their menus. |
 
 The `session.joined` event includes `threadId`, `clientId`, `writerId`, and the active `turnId`, if any. When another client joins, the existing participants receive its `joinedClientId` in `session.updated`. When a writer leaves or disconnects, the earliest remaining client becomes the writer. The endpoint is intended for local use. Clients with access to the endpoint and thread ID can join.
 

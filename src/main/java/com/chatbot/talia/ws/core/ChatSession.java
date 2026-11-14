@@ -86,6 +86,18 @@ final class ChatSession {
         if (!canWrite(peer)) {
             return null;
         }
+        return end();
+    }
+
+    synchronized List<ChatPeer> delete(ChatPeer peer) throws InterruptedException, ExecutionException {
+        if (!canWrite(peer)) {
+            return null;
+        }
+        conversation.delete();
+        return end();
+    }
+
+    private List<ChatPeer> end() {
         List<ChatPeer> participants = List.copyOf(peers.values());
         peers.clear();
         writerId = null;
@@ -237,7 +249,8 @@ final class ChatSession {
             actions.add(ChatAction.CONNECT_AS_WRITER);
         } else if (peer.id().equals(writerId)) {
             if (activeTurn == null) {
-                actions.addAll(List.of(ChatAction.SEND_MESSAGE, ChatAction.CHANGE_MODEL, ChatAction.FINISH_CHAT));
+                actions.addAll(List.of(ChatAction.SEND_MESSAGE, ChatAction.CHANGE_MODEL, ChatAction.FINISH_CHAT,
+                        ChatAction.DELETE_CHAT, ChatAction.CLOSE_CHAT_AND_DELETE, ChatAction.FINISH_CHAT_AND_DELETE));
             }
             if (peers.size() > 1) {
                 actions.add(ChatAction.TRANSFER_WRITER);

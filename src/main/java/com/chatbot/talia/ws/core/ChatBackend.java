@@ -32,6 +32,8 @@ public interface ChatBackend {
         TurnResult runTurn(String text, String model, Consumer<String> onText)
                 throws InterruptedException, ExecutionException;
 
+        void delete() throws InterruptedException, ExecutionException;
+
         @Override
         void close();
     }

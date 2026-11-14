@@ -2,6 +2,7 @@ package com.chatbot.talia.ws.core;
 
 import com.chatbot.talia.ws.core.protocol.ChatAction;
 import com.chatbot.talia.ws.core.protocol.ChatRequest;
+import com.chatbot.talia.ws.core.protocol.ChatRequest.*;
 import com.chatbot.talia.ws.core.protocol.ChatResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,75 +36,74 @@ public final class ChatService implements AutoCloseable {
         peer.send("connected", MENU, null);
     }
 
-    public void handle(String clientId, ChatRequest.Command request) {
+    public void handle(String clientId, ChatRequest request) {
         ChatPeer peer = peers.get(clientId);
         if (peer == null) {
             return;
         }
-        if (request == null || request.action() == null) {
-            error(peer, "invalid_request", "Action is required");
-            return;
-        }
-        String model = request.model();
-        if (model != null && !backend.supportsModel(model)) {
-            error(peer, "invalid_request", "Expected a JSON request with a valid action");
-            return;
-        }
-
         ChatSession chat = peer.chat();
         if (chat == null) {
-            handleMenu(peer, request, model);
+            handleMenu(peer, request);
         } else {
-            switch (request.action()) {
-                case GET_HISTORY -> chat.history(peer, limit(request));
-                case SEND_MESSAGE -> chat.write(peer, request.text() == null ? "" : request.text());
-                case CHANGE_MODEL -> {
-                    if (model == null) {
-                        chat.error(peer, "invalid_model", "Model is required");
+            switch (request) {
+                case GetHistoryRequest history -> chat.history(peer, history.limit() == null ? 50 : history.limit());
+                case SendMessageRequest message -> chat.write(peer, message.text() == null ? "" : message.text());
+                case ChangeModelRequest change -> {
+                    if (change.model() == null || !backend.supportsModel(change.model())) {
+                        chat.error(peer, "invalid_model", "A supported model is required");
                     } else {
-                        chat.changeModel(peer, model);
+                        chat.changeModel(peer, change.model());
                     }
                 }
-                case CLOSE_CHAT -> {
+                case CloseChatRequest ignored -> {
                     if (peer.detach(chat)) {
                         chat.leave(peer);
                         peer.send("chat.closed", MENU, Map.of("threadId", chat.threadId()));
                     }
                 }
-                case FINISH_CHAT -> finish(peer, chat);
-                case CONNECT_AS_WRITER -> chat.claimWriter(peer);
-                case TRANSFER_WRITER -> chat.transfer(peer, request.clientId());
+                case FinishChatRequest ignored -> finish(peer, chat);
+                case CloseChatAndDeleteRequest ignored -> delete(peer, chat.threadId());
+                case FinishChatAndDeleteRequest ignored -> delete(peer, chat.threadId());
+                case DeleteChatRequest deletion -> {
+                    if (deletion.threadId() == null || chat.threadId().equals(deletion.threadId())) {
+                        delete(peer, chat.threadId());
+                    } else {
+                        chat.error(peer, "invalid_thread", "Close the current chat to delete another dialog");
+                    }
+                }
+                case ConnectAsWriterRequest ignored -> chat.claimWriter(peer);
+                case TransferWriterRequest transfer -> chat.transfer(peer, transfer.clientId());
                 default -> chat.error(peer, "action_unavailable", "Close the current chat to return to the menu");
             }
         }
     }
 
-    private void handleMenu(ChatPeer peer, ChatRequest.Command request, String model) {
+    private void handleMenu(ChatPeer peer, ChatRequest request) {
         try {
-            switch (request.action()) {
-                case START_NEW_DIALOG -> start(peer, model);
-                case GET_DIALOGS -> list(peer, request);
-                case CONTINUE_DIALOG -> select(peer, request.threadId());
-                case CONNECT_AS_READER, CONNECT_AS_WRITER -> {
-                    String threadId = request.threadId() == null ? peer.selectedThreadId() : request.threadId();
-                    if (validThreadId(threadId)) {
-                        join(peer, threadId, request.action() == CONNECT_AS_WRITER);
-                    } else {
-                        error(peer, "invalid_thread", "Select a dialog or provide its threadId");
-                    }
-                }
+            switch (request) {
+                case StartNewDialogRequest start -> start(peer, start.model());
+                case GetDialogsRequest dialogs -> list(peer, dialogs);
+                case ContinueDialogRequest dialog -> select(peer, dialog.threadId());
+                case DeleteChatRequest deletion -> delete(peer,
+                        deletion.threadId() == null ? peer.selectedThreadId() : deletion.threadId());
+                case ConnectAsReaderRequest reader -> joinSelectedDialog(peer, reader.threadId(), false);
+                case ConnectAsWriterRequest writer -> joinSelectedDialog(peer, writer.threadId(), true);
                 default -> error(peer, "action_unavailable", "Select a chat first");
             }
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
             error(peer, "codex_unavailable", "Chat request interrupted");
         } catch (ExecutionException | RuntimeException failure) {
-            log.debug("Chat action {} failed", request.action(), failure);
+            log.debug("Chat request {} failed", request.getClass().getSimpleName(), failure);
             error(peer, "codex_unavailable", "Could not complete the chat request");
         }
     }
 
     private void start(ChatPeer peer, String model) throws InterruptedException, ExecutionException {
+        if (model != null && !backend.supportsModel(model)) {
+            error(peer, "invalid_model", "A supported model is required");
+            return;
+        }
         ChatBackend.Conversation conversation = backend.start(model);
         boolean attached = false;
         try {
@@ -138,23 +138,26 @@ public final class ChatService implements AutoCloseable {
         peer.send("dialog.selected", menu(peer), Map.of("threadId", threadId));
     }
 
-    private void list(ChatPeer peer, ChatRequest.Command request) throws InterruptedException, ExecutionException {
-        int limit = limit(request);
-        if (limit < 1 || limit > 100) {
+    private void list(ChatPeer peer, GetDialogsRequest request) throws InterruptedException, ExecutionException {
+        Integer limit = request.limit();
+        if (limit == null || limit < 1 || limit > 100) {
             error(peer, "invalid_limit", "Limit must be an integer from 1 to 100");
             return;
         }
         ChatBackend.DialogPage page = backend.list(limit, request.cursor());
         List<ChatResponse.Dialog> dialogs = new ArrayList<>();
         for (ChatBackend.Dialog dialog : page.dialogs()) {
-            dialogs.add(new ChatResponse.Dialog(dialog.threadId(), dialog.name(), dialog.preview(), roles(dialog.threadId())));
+            dialogs.add(new ChatResponse.Dialog(dialog.threadId(), dialog.name(), dialog.preview(), dialogActions(dialog.threadId())));
         }
         peer.send("dialogs", menu(peer), new ChatResponse.DialogPage(dialogs, page.nextCursor()));
     }
 
-    private List<ChatAction> roles(String threadId) {
+    private List<ChatAction> dialogActions(String threadId) {
         ChatSession chat = chats.get(threadId);
-        return chat != null && chat.hasWriter() ? List.of(CONNECT_AS_READER) : List.of(CONNECT_AS_READER, CONNECT_AS_WRITER);
+        if (chat == null) {
+            return List.of(CONNECT_AS_READER, CONNECT_AS_WRITER, DELETE_CHAT);
+        }
+        return chat.hasWriter() ? List.of(CONNECT_AS_READER) : List.of(CONNECT_AS_READER, CONNECT_AS_WRITER);
     }
 
     private List<ChatAction> menu(ChatPeer peer) {
@@ -163,8 +166,17 @@ public final class ChatService implements AutoCloseable {
             return MENU;
         }
         List<ChatAction> actions = new ArrayList<>(MENU);
-        actions.addAll(roles(threadId));
+        actions.addAll(dialogActions(threadId));
         return actions;
+    }
+
+    private void joinSelectedDialog(ChatPeer peer, String requestedThreadId, boolean asWriter) {
+        String threadId = requestedThreadId == null ? peer.selectedThreadId() : requestedThreadId;
+        if (validThreadId(threadId)) {
+            join(peer, threadId, asWriter);
+        } else {
+            error(peer, "invalid_thread", "Select a dialog or provide its threadId");
+        }
     }
 
     private void join(ChatPeer peer, String threadId, boolean asWriter) {
@@ -193,13 +205,58 @@ public final class ChatService implements AutoCloseable {
             if (participants == null) {
                 return current;
             }
-            for (ChatPeer participant : participants) {
-                if (participant.detach(chat)) {
-                    participant.send("chat.finished", MENU, Map.of("threadId", id));
-                }
-            }
+            returnToMenu(chat, participants, "chat.finished");
             return null;
         });
+    }
+
+    private void delete(ChatPeer peer, String threadId) {
+        if (!validThreadId(threadId)) {
+            error(peer, "invalid_thread", "Select a dialog or provide its threadId");
+            return;
+        }
+        chats.compute(threadId, (id, current) -> {
+            try {
+                if (current == null) {
+                    if (peer.chat() != null) {
+                        return null;
+                    }
+                    try (ChatBackend.Conversation conversation = backend.open(id)) {
+                        conversation.delete();
+                    }
+                    if (id.equals(peer.selectedThreadId())) {
+                        peer.select(null);
+                    }
+                    peer.send("chat.deleted", menu(peer), Map.of("threadId", id));
+                } else if (peer.chat() == current) {
+                    List<ChatPeer> participants = current.delete(peer);
+                    if (participants == null) {
+                        return current;
+                    }
+                    returnToMenu(current, participants, "chat.deleted");
+                } else {
+                    error(peer, "action_unavailable", "Only the current writer can delete an open chat");
+                    return current;
+                }
+                return null;
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                error(peer, "delete_failed", "Chat deletion interrupted");
+                return current;
+            } catch (ExecutionException | RuntimeException failure) {
+                log.debug("Could not delete chat {}", id, failure);
+                error(peer, "delete_failed", "Could not delete the chat");
+                return current;
+            }
+        });
+    }
+
+    private void returnToMenu(ChatSession chat, List<ChatPeer> participants, String event) {
+        for (ChatPeer participant : participants) {
+            if (participant.detach(chat)) {
+                participant.send(event, MENU, Map.of("threadId", chat.threadId()));
+            }
+        }
     }
 
     private ChatSession newChat(String threadId) {
@@ -208,10 +265,6 @@ public final class ChatService implements AutoCloseable {
 
     private static boolean validThreadId(String threadId) {
         return threadId != null && !threadId.isBlank() && threadId.length() <= 128;
-    }
-
-    private static int limit(ChatRequest.Command request) {
-        return request.limit() == null ? 50 : request.limit();
     }
 
     private void error(ChatPeer peer, String code, String message) {
@@ -223,10 +276,10 @@ public final class ChatService implements AutoCloseable {
         }
     }
 
-    public void invalidRequest(String clientId) {
+    public void invalidRequest(String clientId, String message) {
         ChatPeer peer = peers.get(clientId);
         if (peer != null) {
-            error(peer, "invalid_request", "Expected a JSON request with a valid action");
+            error(peer, "invalid_request", message);
         }
     }
 

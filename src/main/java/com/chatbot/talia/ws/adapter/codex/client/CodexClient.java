@@ -3,12 +3,14 @@ package com.chatbot.talia.ws.adapter.codex.client;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
+import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadDeleteRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadListRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadResumeRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadStartRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadTurnsListRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnStartRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadListResponse;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadDeleteResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadResumeResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadStartResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadTurnsListResponse;
@@ -66,6 +68,10 @@ public class CodexClient implements AutoCloseable {
     /** Unsubscribes this session and preserves the stored conversation. */
     public CompletableFuture<String> finishConversation(String threadId) {
         return rpc.unsubscribeThread(threadId).thenApply(CodexClient::unsubscribeStatus);
+    }
+
+    public CompletableFuture<ThreadDeleteResponse> deleteConversation(String threadId) {
+        return rpc.send(ThreadDeleteRequest.create(Objects.requireNonNull(threadId)), ThreadDeleteResponse.class);
     }
 
     public CompletableFuture<ConversationPage> listConversations(int limit) {

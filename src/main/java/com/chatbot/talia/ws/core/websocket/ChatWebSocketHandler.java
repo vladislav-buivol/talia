@@ -8,6 +8,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -34,11 +35,20 @@ public final class ChatWebSocketHandler extends TextWebSocketHandler implements 
 
     @Override
     protected void handleTextMessage(WebSocketSession socket, TextMessage message) {
-        ChatRequest.Command request;
+        ChatRequest request;
         try {
-            request = mapper.readValue(message.getPayload(), ChatRequest.Command.class);
+            JsonNode json = mapper.readTree(message.getPayload());
+            if (json == null || !json.isObject()) {
+                chats.invalidRequest(socket.getId(), "Expected a JSON request with type and action");
+                return;
+            }
+            request = mapper.treeToValue(json, ChatRequest.class);
+            if (!request.type().name().equals(json.path("type").asString(""))) {
+                chats.invalidRequest(socket.getId(), "The type for this action must be " + request.type());
+                return;
+            }
         } catch (JacksonException error) {
-            chats.invalidRequest(socket.getId());
+            chats.invalidRequest(socket.getId(), "Expected a JSON request with a recognized action");
             return;
         }
         chats.handle(socket.getId(), request);

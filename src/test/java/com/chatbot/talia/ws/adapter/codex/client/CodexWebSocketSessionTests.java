@@ -157,6 +157,14 @@ class CodexWebSocketSessionTests {
             CompletableFuture<CodexTurnResult> pendingTurn = client.runTurn(
                     TurnStartRequest.create("thread-1", "disconnect"), text -> fail("Unexpected text"));
             assertEquals("turn/start", server.nextMessage().path("method").asString());
+            CompletableFuture<?> deleted = codex.deleteConversation("thread-to-delete");
+            JsonNode deletion = server.nextMessage();
+            assertEquals("thread/delete", deletion.path("method").asString());
+            assertEquals("thread-to-delete", deletion.path("params").path("threadId").asString());
+            socket.sendMessage(new TextMessage("""
+                    {"id":%d,"result":{}}
+                    """.formatted(deletion.path("id").asLong())));
+            assertNotNull(deleted.get(5, TimeUnit.SECONDS));
             CompletableFuture<String> finished = codex.finishConversationAndCloseAsync("thread-2");
             JsonNode unsubscribe = server.nextMessage();
             assertEquals("thread/unsubscribe", unsubscribe.path("method").asString());
