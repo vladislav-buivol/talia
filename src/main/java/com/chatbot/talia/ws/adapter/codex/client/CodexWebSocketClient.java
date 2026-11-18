@@ -61,6 +61,10 @@ public class CodexWebSocketClient implements AutoCloseable {
 
     public CodexSettings settings() { return settings; }
 
+    public void onNotification(java.util.function.Consumer<CodexMessageCodec.Notification> callback) {
+        handlerRegistry.onNotification(callback);
+    }
+
     public void onServerRequest(java.util.function.Consumer<CodexMessageCodec.ServerRequest> callback) {
         handlerRegistry.onServerRequest(callback);
     }

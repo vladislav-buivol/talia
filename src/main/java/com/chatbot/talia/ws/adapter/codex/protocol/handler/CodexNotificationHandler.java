@@ -11,13 +11,20 @@ public final class CodexNotificationHandler
         implements MessageHandler<CodexMessageCodec.Notification> {
 
     private final CodexMessageReporter reporter;
+    private volatile java.util.function.Consumer<CodexMessageCodec.Notification> listener;
 
     public CodexNotificationHandler(CodexMessageReporter reporter) {
         this.reporter = reporter;
     }
 
+    public void setListener(java.util.function.Consumer<CodexMessageCodec.Notification> listener) {
+        this.listener = listener;
+    }
+
     @Override
     public void handle(CodexMessageCodec.Notification notification) {
         reporter.reportNotification(notification);
+        var current = listener;
+        if (current != null) current.accept(notification);
     }
 }

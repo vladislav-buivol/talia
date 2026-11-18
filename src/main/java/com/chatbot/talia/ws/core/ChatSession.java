@@ -33,6 +33,7 @@ final class ChatSession {
         this.model = model;
         this.onIdle = onIdle;
         conversation.onApproval(this::approvalRequired);
+        conversation.onApprovalResolved(this::approvalResolved);
     }
 
     String threadId() {
@@ -178,6 +179,10 @@ final class ChatSession {
         broadcast(event);
     }
 
+    private synchronized void approvalResolved(String requestId) {
+        broadcast(event("approval.resolved").put("requestId", requestId));
+    }
+
     synchronized void resolveApproval(ChatPeer peer, String requestId,
             com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.Decision decision) {
         if (!peer.id().equals(writerId)) {
@@ -188,7 +193,6 @@ final class ChatSession {
             error(peer, "approval_unavailable", "Approval was already resolved or is unavailable");
             return;
         }
-        broadcast(event("approval.resolved").put("requestId", requestId));
     }
 
     synchronized void cancel(ChatPeer peer) {

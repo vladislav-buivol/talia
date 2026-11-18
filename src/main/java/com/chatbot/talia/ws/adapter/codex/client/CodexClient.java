@@ -40,6 +40,7 @@ public class CodexClient implements AutoCloseable {
         this.rpc = Objects.requireNonNull(rpc);
         this.approvals = new ApprovalCoordinator(rpc, rpc.settings().approvalTimeout());
         rpc.onServerRequest(approvals::receive);
+        rpc.onNotification(approvals::onNotification);
     }
 
     public static CodexClient create(String serverUrl) {
@@ -55,6 +56,10 @@ public class CodexClient implements AutoCloseable {
     /** Accesses the typed RPC API on this client's session. */
     public void onApproval(java.util.function.Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {
         approvals.setListener(listener);
+    }
+
+    public void onApprovalResolved(java.util.function.Consumer<String> listener) {
+        approvals.setResolvedListener(listener);
     }
 
     public boolean resolveApproval(String requestId, ApprovalCoordinator.Decision decision) {

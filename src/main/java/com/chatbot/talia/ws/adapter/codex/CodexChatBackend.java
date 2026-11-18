@@ -81,11 +81,15 @@ public final class CodexChatBackend implements ChatBackend {
         private boolean closed;
         private boolean interruptRequested;
         private java.util.function.Consumer<com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt> approvalListener = prompt -> {};
+        private java.util.function.Consumer<String> resolvedListener = id -> {};
 
         CodexConversation(String threadId, CodexClient startedClient) {
             this.threadId = threadId;
             client = startedClient;
-            if (client != null) client.onApproval(approvalListener);
+            if (client != null) {
+                client.onApproval(approvalListener);
+                client.onApprovalResolved(resolvedListener);
+            }
             resumedClient = startedClient;
             ready = CompletableFuture.completedFuture(null);
         }
@@ -140,6 +144,7 @@ public final class CodexChatBackend implements ChatBackend {
                     if (client != null) client.close();
                     client = clients.get();
                     client.onApproval(approvalListener);
+                    client.onApprovalResolved(resolvedListener);
                     ready = new CompletableFuture<>();
                     CodexClient connecting = client;
                     CompletableFuture<Void> completion = ready;
@@ -156,6 +161,12 @@ public final class CodexChatBackend implements ChatBackend {
         public synchronized void onApproval(java.util.function.Consumer<com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt> listener) {
             approvalListener = listener;
             if (client != null) client.onApproval(listener);
+        }
+
+        @Override
+        public synchronized void onApprovalResolved(java.util.function.Consumer<String> listener) {
+            resolvedListener = listener;
+            if (client != null) client.onApprovalResolved(listener);
         }
 
         @Override

@@ -27,6 +27,7 @@ public final class ApprovalCoordinator implements AutoCloseable {
     private final Duration timeout;
     private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
     private volatile Consumer<ApprovalPrompt> listener;
+    private volatile Consumer<String> resolvedListener;
     private volatile boolean closed;
 
     public ApprovalCoordinator(CodexWebSocketClient client, Duration timeout) {
@@ -35,6 +36,22 @@ public final class ApprovalCoordinator implements AutoCloseable {
     }
 
     public void setListener(Consumer<ApprovalPrompt> listener) { this.listener = listener; }
+    public void setResolvedListener(Consumer<String> listener) { this.resolvedListener = listener; }
+
+    public void onNotification(CodexMessageCodec.Notification notification) {
+        if (notification.method() != com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod.SERVER_REQUEST_RESOLVED) return;
+        var params = notification.params();
+        if (params == null) return;
+        var rawId = params.path("requestId");
+        String id = rawId.isIntegralNumber() ? "n:" + rawId.asLong()
+                : rawId.isString() ? "s:" + rawId.asString() : null;
+        if (id != null && pending.remove(id) != null) resolved(id);
+    }
+
+    private void resolved(String id) {
+        Consumer<String> current = resolvedListener;
+        if (current != null) current.accept(id);
+    }
 
     private static String key(CodexMessageCodec.RequestId id) {
         return switch (id) {
@@ -60,7 +77,7 @@ public final class ApprovalCoordinator implements AutoCloseable {
         Pending item = new Pending(request);
         if (pending.putIfAbsent(id, item) != null) return;
         CompletableFuture.delayedExecutor(timeout.toMillis(), TimeUnit.MILLISECONDS).execute(() -> {
-            if (pending.remove(id, item)) decline(request);
+            if (pending.remove(id, item)) { decline(request); resolved(id); }
         });
         Consumer<ApprovalPrompt> current = listener;
         if (current == null) {
@@ -82,6 +99,7 @@ public final class ApprovalCoordinator implements AutoCloseable {
         Pending item = pending.remove(requestId);
         if (item == null) return false;
         sendDecision(item.request(), decision);
+        resolved(requestId);
         return true;
     }
 

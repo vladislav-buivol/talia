@@ -38,6 +38,7 @@ public interface ChatBackend {
         void delete() throws InterruptedException, ExecutionException;
 
         default void onApproval(java.util.function.Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {}
+        default void onApprovalResolved(java.util.function.Consumer<String> listener) {}
 
         default boolean resolveApproval(String requestId, ApprovalCoordinator.Decision decision) {
             return false;

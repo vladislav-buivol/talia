@@ -13,12 +13,14 @@ import java.util.Map;
 public final class CodexMessageHandlerRegistry {
     private final Map<JsonRpcResponse.Type, MessageHandler<JsonRpcResponse>> handlers;
     private final CodexServerRequestHandler serverRequests;
+    private final CodexNotificationHandler notifications;
 
     public CodexMessageHandlerRegistry(
             CodexNotificationHandler notificationHandler,
             CodexServerRequestHandler serverRequestHandler,
             CodexResponseHandler responseHandler) {
         this.serverRequests = serverRequestHandler;
+        this.notifications = notificationHandler;
         handlers = Map.of(
                 JsonRpcResponse.Type.NOTIFICATION,
                 message -> notificationHandler.handle((CodexMessageCodec.Notification) message),
@@ -34,6 +36,10 @@ public final class CodexMessageHandlerRegistry {
                 new CodexServerRequestHandler(reporter),
                 new CodexResponseHandler(reporter)
         );
+    }
+
+    public void onNotification(java.util.function.Consumer<CodexMessageCodec.Notification> callback) {
+        notifications.setListener(callback);
     }
 
     public void onServerRequest(java.util.function.Consumer<CodexMessageCodec.ServerRequest> callback) {
