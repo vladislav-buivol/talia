@@ -22,8 +22,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import java.net.http.WebSocket;
 import java.net.URI;
+import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -68,11 +68,11 @@ public class CodexWebSocketClient implements AutoCloseable {
         return settings;
     }
 
-    public void onNotification(java.util.function.Consumer<CodexMessageCodec.Notification> callback) {
+    public void onNotification(Consumer<CodexMessageCodec.Notification> callback) {
         handlerRegistry.onNotification(callback);
     }
 
-    public void onServerRequest(java.util.function.Consumer<CodexMessageCodec.ServerRequest> callback) {
+    public void onServerRequest(Consumer<CodexMessageCodec.ServerRequest> callback) {
         handlerRegistry.onServerRequest(callback);
     }
 
