@@ -1,34 +1,39 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.rpc;
 
+import com.chatbot.talia.ws.adapter.codex.client.CodexTurnResult;
+import com.chatbot.talia.ws.adapter.codex.client.transport.CodexWebSocketConnection;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexMethod;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexNotification;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexRequest;
-import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializedNotification;
+import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadUnsubscribeRequest;
-import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnStartRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnInterruptRequest;
-import com.chatbot.talia.ws.adapter.codex.protocol.response.TurnInterruptResponse;
+import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnStartRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.InitializeResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcSuccessResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadUnsubscribeResponse;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.TurnInterruptResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import java.net.URI;
 import java.net.http.WebSocket;
-import java.util.Objects;
+import java.net.URI;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.Objects;
 
 @Component
 @Profile("codex")
@@ -42,7 +47,7 @@ public class CodexWebSocketClient implements AutoCloseable {
     private final CodexSettings settings;
     private final CodexMessageHandlerRegistry handlerRegistry;
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     public CodexWebSocketClient(
             @Value("${talia.codex.url}") String serverUrl,
             CodexMessageCodec messageCodec,
@@ -59,7 +64,9 @@ public class CodexWebSocketClient implements AutoCloseable {
         this.connection = new CodexWebSocketConnection(settings.url(), dispatcher, settings);
     }
 
-    public CodexSettings settings() { return settings; }
+    public CodexSettings settings() {
+        return settings;
+    }
 
     public void onNotification(java.util.function.Consumer<CodexMessageCodec.Notification> callback) {
         handlerRegistry.onNotification(callback);
@@ -177,8 +184,12 @@ public class CodexWebSocketClient implements AutoCloseable {
         }
 
         String threadId = request.params().threadId();
-        CodexTurn turn = new CodexTurn(onText, settings.maxEarlyNotifications(), settings.turnStartTimeout(),
-                id -> send(TurnInterruptRequest.create(threadId, id), TurnInterruptResponse.class).thenApply(ignored -> null));
+        CodexTurn turn = new CodexTurn(
+                onText,
+                settings.maxEarlyNotifications(),
+                settings.turnStartTimeout(),
+                id -> send(TurnInterruptRequest.create(threadId, id), TurnInterruptResponse.class)
+                        .thenApply(ignored -> null));
         if (!dispatcher.registerTurn(threadId, turn)) {
             return CompletableFuture.failedFuture(new IllegalStateException("Already tracking a turn on thread " + threadId));
         }
@@ -192,7 +203,7 @@ public class CodexWebSocketClient implements AutoCloseable {
     }
 
     /** Unsubscribes this connection while preserving the conversation and its history. */
-    CompletableFuture<ThreadUnsubscribeResponse> unsubscribeThread(String threadId) {
+    public CompletableFuture<ThreadUnsubscribeResponse> unsubscribeThread(String threadId) {
         Objects.requireNonNull(threadId);
         CodexTurn turn = dispatcher.trackedTurn(threadId);
         CompletableFuture<ThreadUnsubscribeResponse> response = send(
@@ -218,9 +229,13 @@ public class CodexWebSocketClient implements AutoCloseable {
         return pending.future();
     }
 
-    private java.time.Duration timeoutFor(String method) {
-        if (CodexMethod.TURN_START.value().equals(method)) return settings.turnStartTimeout();
-        if (CodexMethod.TURN_INTERRUPT.value().equals(method)) return settings.interruptTimeout();
+    private Duration timeoutFor(String method) {
+        if (CodexMethod.TURN_START.value().equals(method)) {
+            return settings.turnStartTimeout();
+        }
+        if (CodexMethod.TURN_INTERRUPT.value().equals(method)) {
+            return settings.interruptTimeout();
+        }
         return settings.rpcTimeout();
     }
 
@@ -252,7 +267,7 @@ public class CodexWebSocketClient implements AutoCloseable {
         return connection.closeAsync();
     }
 
-    boolean isClosed() {
+    public boolean isClosed() {
         return dispatcher.closeCause() != null;
     }
 }

@@ -1,11 +1,12 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.transport;
 
 import java.net.http.WebSocket;
+import java.time.Duration;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -15,7 +16,7 @@ public class SendTask implements Runnable {
     private final WebSocket socket;
     private final BooleanSupplier requestFinished;
     private final Consumer<Throwable> onSendTimeout;
-    private final java.time.Duration sendTimeout;
+    private final Duration sendTimeout;
 
     SendTask(String message, CompletableFuture<Void> result, WebSocket socket,
              BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout) {
@@ -24,11 +25,11 @@ public class SendTask implements Runnable {
         this.socket = socket;
         this.requestFinished = requestFinished;
         this.onSendTimeout = onSendTimeout;
-        this.sendTimeout = java.time.Duration.ofSeconds(10);
+        this.sendTimeout = Duration.ofSeconds(10);
     }
 
     SendTask(String message, CompletableFuture<Void> result, WebSocket socket,
-             BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout, java.time.Duration timeout) {
+             BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout, Duration timeout) {
         this.message = message;
         this.result = result;
         this.socket = socket;
@@ -61,5 +62,4 @@ public class SendTask implements Runnable {
             result.completeExceptionally(error);
         }
     }
-
 }

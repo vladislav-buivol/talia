@@ -2,7 +2,7 @@ package com.chatbot.talia.ws.adapter.codex.config;
 
 import com.chatbot.talia.ws.adapter.codex.CodexChatBackend;
 import com.chatbot.talia.ws.adapter.codex.client.CodexClient;
-import com.chatbot.talia.ws.adapter.codex.client.CodexSettings;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest.ClientInfo;
 import com.chatbot.talia.ws.core.ChatService;

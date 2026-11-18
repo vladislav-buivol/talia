@@ -1,5 +1,8 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.rpc;
 
+import com.chatbot.talia.ws.adapter.codex.client.transport.CodexWebSocketConnection;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
+import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageReporter;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.InitializeResponse;
@@ -156,7 +159,7 @@ class CodexWebSocketConnectionTests {
         try (CodexWebSocketConnection connection = openConnection()) {
             connection.send("in flight");
             assertTrue(sending.await(2, TimeUnit.SECONDS));
-            for (int i = 0; i < CodexWebSocketConnection.SEND_QUEUE_CAPACITY; i++) {
+            for (int i = 0; i < CodexSettings.DEFAULT_SEND_QUEUE_CAPACITY; i++) {
                 assertFalse(connection.send("queued").isDone());
             }
             assertInstanceOf(RejectedExecutionException.class, failureOf(connection.send("overflow")));

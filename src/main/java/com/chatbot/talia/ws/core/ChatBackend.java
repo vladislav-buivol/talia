@@ -1,7 +1,7 @@
 package com.chatbot.talia.ws.core;
 
 import com.chatbot.talia.ws.core.protocol.response.ChatMessage;
-import com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator;
+import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
 
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -37,8 +37,10 @@ public interface ChatBackend {
 
         void delete() throws InterruptedException, ExecutionException;
 
-        default void onApproval(java.util.function.Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {}
-        default void onApprovalResolved(java.util.function.Consumer<String> listener) {}
+        default void onApproval(Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {
+        }
+        default void onApprovalResolved(Consumer<String> listener) {
+        }
 
         default boolean resolveApproval(String requestId, ApprovalCoordinator.Decision decision) {
             return false;

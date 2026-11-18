@@ -1,11 +1,10 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.rpc;
 
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.TurnStartResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,7 +56,7 @@ class CodexTurnCancellationTests {
     }
 
     private CodexMessageCodec.Notification notification(NotificationMethod method, String name, String json) {
-        JsonNode params = mapper.readTree(json);
-        return new CodexMessageCodec.Notification(method, name, params, params);
+        return (CodexMessageCodec.Notification) new CodexMessageCodec(mapper)
+                .decode("{\"method\":\"" + name + "\",\"params\":" + json + "}", id -> null);
     }
 }

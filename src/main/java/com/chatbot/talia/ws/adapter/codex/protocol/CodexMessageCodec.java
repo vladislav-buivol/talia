@@ -1,16 +1,23 @@
 package com.chatbot.talia.ws.adapter.codex.protocol;
 
+import com.chatbot.talia.ws.adapter.codex.protocol.message.CodexServerRequestParams;
+import com.chatbot.talia.ws.adapter.codex.protocol.message.NotificationParams;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.ServerRequestMethod;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcError;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcErrorResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcSuccessResponse;
-import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod;
-import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.ServerRequestMethod;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadTurnsListResponse;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.function.LongFunction;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 @Component
 public class CodexMessageCodec {
@@ -36,9 +43,13 @@ public class CodexMessageCodec {
     }
 
     private static void writeId(tools.jackson.databind.node.ObjectNode reply, RequestId id) {
-        if (id instanceof NumericRequestId number) reply.put("id", number.value());
-        else if (id instanceof StringRequestId string) reply.put("id", string.value());
-        else throw new IllegalArgumentException("Unsupported JSON-RPC request ID");
+        if (id instanceof NumericRequestId number) {
+            reply.put("id", number.value());
+        } else if (id instanceof StringRequestId string) {
+            reply.put("id", string.value());
+        } else {
+            throw new IllegalArgumentException("Unsupported JSON-RPC request ID");
+        }
     }
 
     public String encode(Object message) {
@@ -95,7 +106,55 @@ public class CodexMessageCodec {
             return new UnmatchedResponse(id);
         }
 
+        if (expectedType == ThreadTurnsListResponse.class) {
+            return decodeThreadTurnsListResponse(message, id);
+        }
+
         return mapper.treeToValue(message, expectedType);
+    }
+
+    /** Decodes a thread history without leaking arbitrary JSON nodes into response DTOs. */
+    public ThreadTurnsListResponse readThreadTurnsListResponse(String json) {
+        JsonNode message = mapper.readTree(json);
+        return decodeThreadTurnsListResponse(message, readResponseId(message));
+    }
+
+    private ThreadTurnsListResponse decodeThreadTurnsListResponse(JsonNode message, Long id) {
+        JsonNode result = message.path("result");
+        JsonNode rawTurns = result.path("data");
+        List<ThreadTurnsListResponse.Turn> turns = new ArrayList<>();
+
+        if (rawTurns.isArray()) {
+            for (JsonNode rawTurn : rawTurns) {
+                List<ThreadTurnsListResponse.Item> items = new ArrayList<>();
+                JsonNode rawItems = rawTurn.path("items");
+                if (rawItems.isArray()) {
+                    for (JsonNode item : rawItems) {
+                        List<ThreadTurnsListResponse.UserInput> contents = new ArrayList<>();
+                        JsonNode content = item.get("content");
+                        if (content != null && content.isArray()) {
+                            for (JsonNode input : content) {
+                                if (input.isObject()) {
+                                    contents.add(mapper.treeToValue(
+                                            input, ThreadTurnsListResponse.UserInput.class));
+                                }
+                            }
+                        }
+                        items.add(new ThreadTurnsListResponse.Item(
+                                optionalString(item, "type"),
+                                List.copyOf(contents),
+                                optionalString(item, "text")));
+                    }
+                }
+                turns.add(new ThreadTurnsListResponse.Turn(List.copyOf(items)));
+            }
+        }
+
+        return new ThreadTurnsListResponse(
+                id,
+                new ThreadTurnsListResponse.Result(
+                        List.copyOf(turns),
+                        optionalString(result, "nextCursor")));
     }
 
     private static Notification decodeNotification(JsonNode message) {
@@ -104,32 +163,77 @@ public class CodexMessageCodec {
         }
 
         String method = readMethod(message);
-        return new Notification(
-                NotificationMethod.fromWireName(method),
-                method,
-                message.get("params"),
-                message
-        );
+        JsonNode params = message.get("params");
+        NotificationParams.Item item = null;
+        NotificationParams.Turn turn = null;
+
+        if (params != null && params.isObject()) {
+            JsonNode itemNode = params.get("item");
+            if (itemNode != null && itemNode.isObject()) {
+                item = new NotificationParams.Item(optionalString(itemNode, "type"));
+            }
+
+            JsonNode turnNode = params.get("turn");
+            if (turnNode != null && turnNode.isObject()) {
+                JsonNode errorNode = turnNode.get("error");
+                NotificationParams.Failure failure = errorNode != null && errorNode.isObject()
+                        ? new NotificationParams.Failure(optionalString(errorNode, "message"))
+                        : null;
+                turn = new NotificationParams.Turn(
+                        optionalString(turnNode, "id"),
+                        optionalString(turnNode, "status"),
+                        failure);
+            }
+        }
+
+        NotificationParams payload = params == null || !params.isObject()
+                ? null
+                : new NotificationParams(
+                        optionalString(params, "threadId"),
+                        optionalString(params, "turnId"),
+                        optionalString(params, "delta"),
+                        item,
+                        turn,
+                        optionalId(params.get("requestId")));
+
+        return new Notification(NotificationMethod.fromWireName(method), method, payload);
     }
 
     private static ServerRequest decodeServerRequest(JsonNode message) {
         String method = readMethod(message);
-        JsonNode id = message.get("id");
+        RequestId requestId = requiredId(message.get("id"), "Server request ID");
+        JsonNode params = message.get("params");
 
-        RequestId requestId;
-        if (id != null && id.isString()) {
-            requestId = new StringRequestId(id.stringValue());
-        } else {
-            requestId = new NumericRequestId(readLong(id, "Server request ID"));
+        CodexServerRequestParams payload = params == null || !params.isObject()
+                ? null
+                : new CodexServerRequestParams(
+                        optionalString(params, "threadId"),
+                        optionalString(params, "turnId"),
+                        optionalString(params, "itemId"),
+                        optionalString(params, "reason"),
+                        optionalString(params, "command"),
+                        optionalString(params, "cwd"));
+
+        return new ServerRequest(requestId, ServerRequestMethod.fromWireName(method), method, payload);
+    }
+
+    private static String optionalString(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value != null && value.isString() ? value.asString() : null;
+    }
+
+    private static RequestId optionalId(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
         }
+        return requiredId(node, "Request ID");
+    }
 
-        return new ServerRequest(
-                requestId,
-                ServerRequestMethod.fromWireName(method),
-                method,
-                message.get("params"),
-                message
-        );
+    private static RequestId requiredId(JsonNode node, String label) {
+        if (node != null && node.isString()) {
+            return new StringRequestId(node.asString());
+        }
+        return new NumericRequestId(readLong(node, label));
     }
 
     private static String readMethod(JsonNode message) {
@@ -148,16 +252,39 @@ public class CodexMessageCodec {
         return node.asLong();
     }
 
-    private static JsonRpcError readError(JsonNode error) {
-        if (!error.isObject() || !error.path("message").isString()) {
+    private JsonRpcError readError(JsonNode error) {
+        if (error == null || !error.isObject() || !error.path("message").isString()) {
             throw new IllegalArgumentException("Expected an error object with a message");
         }
+
+        JsonNode dataNode = error.get("data");
+        JsonRpcError.Data data = dataNode == null || dataNode.isNull()
+                ? null
+                : new JsonRpcError.Data(mapper.writeValueAsString(dataNode));
 
         return new JsonRpcError(
                 readLong(error.get("code"), "Error code"),
                 error.get("message").stringValue(),
-                error.get("data")
-        );
+                data);
+    }
+
+    /** Parses the generated Codex client request schema at the protocol boundary. */
+    public List<String> readClientRequestMethods(String json) {
+        JsonNode requests = mapper.readTree(json).path("oneOf");
+        if (!requests.isArray() || requests.isEmpty()) {
+            throw new IllegalArgumentException("Expected a nonempty oneOf array");
+        }
+
+        Set<String> methods = new LinkedHashSet<>();
+        for (JsonNode request : requests) {
+            JsonNode method = request.path("properties").path("method");
+            JsonNode name = method.has("const") ? method.path("const") : method.path("enum").path(0);
+            if (!name.isString() || name.asString().isBlank()) {
+                throw new IllegalArgumentException("Invalid Codex request method definition");
+            }
+            methods.add(name.asString());
+        }
+        return List.copyOf(methods);
     }
 
     private record UnmatchedResponse(Long id) implements JsonRpcResponse {
@@ -183,7 +310,7 @@ public class CodexMessageCodec {
     }
 
     public record Notification(
-            NotificationMethod method, String wireMethod, JsonNode params, JsonNode raw
+            NotificationMethod method, String wireMethod, NotificationParams params
     ) implements JsonRpcResponse {
 
         @Override
@@ -199,7 +326,7 @@ public class CodexMessageCodec {
 
     public record ServerRequest(
             RequestId id, ServerRequestMethod method, String wireMethod,
-            JsonNode params, JsonNode raw
+            CodexServerRequestParams params
     ) implements JsonRpcResponse {
 
         @Override

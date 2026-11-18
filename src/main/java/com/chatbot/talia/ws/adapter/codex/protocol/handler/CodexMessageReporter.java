@@ -1,4 +1,4 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.protocol.handler;
 
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcErrorResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
@@ -15,17 +15,14 @@ public final class CodexMessageReporter {
 
     public void reportNotification(CodexMessageCodec.Notification notification) {
         if (notification.params() == null) return;
-        log.debug("{} Codex notification: method={}, threadId={}, turnId={}, type={}, text={}",
-                switch (notification.params().path("item").path("type").asString()) {
-                    case "userMessage" -> "[USER_MESSAGE " + notification.wireMethod() + "] >>>";
-                    case "agentMessage" -> "[AGENT_MESSAGE " + notification.wireMethod() + "] <<<";
-                    default -> "";
-                },
+        String itemType = notification.params().item() == null
+                ? null
+                : notification.params().item().type();
+        log.debug("Codex notification: method={}, threadId={}, turnId={}, itemType={}",
                 notification.wireMethod(),
-                notification.params().path("threadId").asString(""),
-                notification.params().path("turnId").asString(""),
-                notification.params().path("item").path("type").asString(""),
-                "[redacted]");
+                notification.params().threadId(),
+                notification.params().turnId(),
+                itemType);
     }
 
     public void reportServerRequest(CodexMessageCodec.ServerRequest request) {

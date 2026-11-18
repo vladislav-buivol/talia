@@ -1,5 +1,9 @@
 package com.chatbot.talia.ws.adapter.codex.client;
 
+import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageReporter;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
+import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexWebSocketClient;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
@@ -17,7 +21,6 @@ import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadTurnsListRespo
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadUnsubscribeResponse;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
@@ -54,11 +57,11 @@ public class CodexClient implements AutoCloseable {
     }
 
     /** Accesses the typed RPC API on this client's session. */
-    public void onApproval(java.util.function.Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {
+    public void onApproval(Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {
         approvals.setListener(listener);
     }
 
-    public void onApprovalResolved(java.util.function.Consumer<String> listener) {
+    public void onApprovalResolved(Consumer<String> listener) {
         approvals.setResolvedListener(listener);
     }
 
@@ -271,18 +274,22 @@ public class CodexClient implements AutoCloseable {
         return new ConversationHistory.Message(ConversationHistory.Role.USER, userText(item.content(), false), item.content());
     }
 
-    private static String userText(JsonNode content, boolean textOnly) {
-        if (content == null || (textOnly && !content.isArray())) {
+    private static String userText(
+            List<ThreadTurnsListResponse.UserInput> content,
+            boolean textOnly) {
+        if (content == null) {
             return textOnly ? null : "";
         }
+
         StringBuilder text = new StringBuilder();
-        for (JsonNode input : content) {
-            if ("text".equals(input.path("type").asString()) && input.path("text").isString()) {
-                text.append(input.path("text").asString());
+        for (ThreadTurnsListResponse.UserInput input : content) {
+            if ("text".equals(input.type()) && input.text() != null) {
+                text.append(input.text());
             } else if (textOnly) {
                 return null;
             }
         }
+
         return text.toString();
     }
 

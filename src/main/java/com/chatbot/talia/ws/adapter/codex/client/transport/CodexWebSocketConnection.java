@@ -1,20 +1,30 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.transport;
 
-import com.chatbot.talia.ws.adapter.codex.listener.CodexWebSocketListener;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexMessageDispatcher;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.Set;
 
 public class CodexWebSocketConnection implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CodexWebSocketConnection.class);
@@ -38,7 +48,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         this(serverAddress, dispatcher, HttpClient.newHttpClient(), settings);
     }
 
-    CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher, HttpClient httpClient) {
+    public CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher, HttpClient httpClient) {
         this(serverAddress, dispatcher, httpClient, CodexSettings.local(serverAddress));
     }
 
@@ -82,7 +92,6 @@ public class CodexWebSocketConnection implements AutoCloseable {
         return webSocket;
     }
 
-
     public CompletableFuture<WebSocket> ping(String message) {
         WebSocket socket = webSocket;
         CompletableFuture<WebSocket> result = trackSend(socket);
@@ -106,7 +115,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         return send(message, () -> false);
     }
 
-    CompletableFuture<Void> send(String message, BooleanSupplier requestFinished) {
+    public CompletableFuture<Void> send(String message, BooleanSupplier requestFinished) {
         WebSocket socket = webSocket;
         CompletableFuture<Void> result = trackSend(socket);
         if (!result.isDone()) {
@@ -141,7 +150,6 @@ public class CodexWebSocketConnection implements AutoCloseable {
         }
         return ByteBuffer.wrap(bytes);
     }
-
 
     @Override
     public void close() {
@@ -183,7 +191,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         }
     }
 
-    void abort(Throwable cause) {
+    public void abort(Throwable cause) {
         boolean closingStarted = dispatcher.beginClose(cause);
         if (closingStarted) {
             sender.shutdownNow();

@@ -1,5 +1,6 @@
 package com.chatbot.talia.ws.adapter.codex;
 
+import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
 import com.chatbot.talia.ws.adapter.codex.client.CodexClient;
 import com.chatbot.talia.ws.adapter.codex.client.CodexTurnResult;
 import com.chatbot.talia.ws.adapter.codex.client.ConversationHistory;
@@ -80,8 +81,8 @@ public final class CodexChatBackend implements ChatBackend {
         private CodexClient resumedClient;
         private boolean closed;
         private boolean interruptRequested;
-        private java.util.function.Consumer<com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt> approvalListener = prompt -> {};
-        private java.util.function.Consumer<String> resolvedListener = id -> {};
+        private Consumer<ApprovalCoordinator.ApprovalPrompt> approvalListener = prompt -> {};
+        private Consumer<String> resolvedListener = id -> {};
 
         CodexConversation(String threadId, CodexClient startedClient) {
             this.threadId = threadId;
@@ -123,7 +124,9 @@ public final class CodexChatBackend implements ChatBackend {
                 active = model == null
                         ? current.runTurn(threadId, text, onText)
                         : current.runTurn(threadId, text, CodexModel.fromId(model), onText);
-                if (interruptRequested) current.interruptTurn(threadId);
+                if (interruptRequested) {
+                    current.interruptTurn(threadId);
+                }
             }
             try {
                 CodexTurnResult result = active.get();
@@ -141,7 +144,9 @@ public final class CodexChatBackend implements ChatBackend {
                     throw new IllegalStateException("Conversation is closed");
                 }
                 if (client == null || client.isClosed() || ready.isCompletedExceptionally()) {
-                    if (client != null) client.close();
+                    if (client != null) {
+                        client.close();
+                    }
                     client = clients.get();
                     client.onApproval(approvalListener);
                     client.onApprovalResolved(resolvedListener);
@@ -158,19 +163,23 @@ public final class CodexChatBackend implements ChatBackend {
         }
 
         @Override
-        public synchronized void onApproval(java.util.function.Consumer<com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt> listener) {
+        public synchronized void onApproval(Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {
             approvalListener = listener;
-            if (client != null) client.onApproval(listener);
+            if (client != null) {
+                client.onApproval(listener);
+            }
         }
 
         @Override
-        public synchronized void onApprovalResolved(java.util.function.Consumer<String> listener) {
+        public synchronized void onApprovalResolved(Consumer<String> listener) {
             resolvedListener = listener;
-            if (client != null) client.onApprovalResolved(listener);
+            if (client != null) {
+                client.onApprovalResolved(listener);
+            }
         }
 
         @Override
-        public synchronized boolean resolveApproval(String requestId, com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.Decision decision) {
+        public synchronized boolean resolveApproval(String requestId, ApprovalCoordinator.Decision decision) {
             return client != null && client.resolveApproval(requestId, decision);
         }
 
@@ -194,7 +203,9 @@ public final class CodexChatBackend implements ChatBackend {
                 interruptRequested = true;
                 current = client;
             }
-            if (current != null && !current.isClosed()) current.interruptTurn(threadId).get();
+            if (current != null && !current.isClosed()) {
+                current.interruptTurn(threadId).get();
+            }
         }
 
         @Override

@@ -1,8 +1,8 @@
 
-package com.chatbot.talia.ws.adapter.codex.listener;
+package com.chatbot.talia.ws.adapter.codex.client.transport;
 
-import com.chatbot.talia.ws.adapter.codex.client.CodexMessageDispatcher;
-import com.chatbot.talia.ws.adapter.codex.client.CodexSettings;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexMessageDispatcher;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,9 +10,9 @@ import java.io.IOException;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
+import java.util.Objects;
 
 public class CodexWebSocketListener implements WebSocket.Listener {
 

@@ -1,12 +1,12 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.approval;
 
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexWebSocketClient;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.ServerRequestMethod;
+import com.chatbot.talia.ws.adapter.codex.protocol.message.CodexServerRequestParams;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.ApprovalDecisionResult;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 import java.time.Duration;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,7 +14,6 @@ import static org.mockito.Mockito.*;
 
 class ApprovalCoordinatorTests {
     private final CodexWebSocketClient rpc = mock(CodexWebSocketClient.class);
-    private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
     void preservesOriginalNumericIdAndRejectsDuplicateDecision() {
@@ -29,7 +28,7 @@ class ApprovalCoordinatorTests {
         assertEquals("n:17", prompt.get().requestId());
         assertTrue(coordinator.resolve(prompt.get().requestId(), ApprovalCoordinator.Decision.ACCEPT));
         assertFalse(coordinator.resolve(prompt.get().requestId(), ApprovalCoordinator.Decision.DECLINE));
-        verify(rpc, times(1)).sendServerResult(request.id(), Map.of("decision", "accept"));
+        verify(rpc, times(1)).sendServerResult(request.id(), new ApprovalDecisionResult("accept"));
         coordinator.close();
     }
 
@@ -41,7 +40,7 @@ class ApprovalCoordinatorTests {
         when(rpc.sendServerResult(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
         ApprovalCoordinator coordinator = new ApprovalCoordinator(rpc, Duration.ofSeconds(10));
         coordinator.receive(request);
-        verify(rpc).sendServerResult(request.id(), Map.of("decision", "decline"));
+        verify(rpc).sendServerResult(request.id(), new ApprovalDecisionResult("decline"));
         coordinator.close();
     }
 
@@ -59,9 +58,8 @@ class ApprovalCoordinatorTests {
 
     private CodexMessageCodec.ServerRequest request(CodexMessageCodec.RequestId id,
             ServerRequestMethod method, String wire) {
-        JsonNode params = mapper.readTree("""
-                {"threadId":"thr","turnId":"turn","reason":"testing","command":"mvn test"}
-                """);
-        return new CodexMessageCodec.ServerRequest(id, method, wire, params, params);
+        CodexServerRequestParams params = new CodexServerRequestParams(
+                "thr", "turn", null, "testing", "mvn test", null);
+        return new CodexMessageCodec.ServerRequest(id, method, wire, params);
     }
 }

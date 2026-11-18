@@ -17,6 +17,20 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      - name: Verify typed Codex codec boundaries
+        run: |
+          if grep -R -nE '(^|[^[:alnum:]_])var[[:space:]]' src/main/java --include='*.java'; then
+            echo 'Java var declarations are not permitted.'
+            exit 1
+          fi
+          NON_CODEC_JSON=$(grep -Rl 'tools.jackson.databind.JsonNode' \
+            src/main/java/com/chatbot/talia/ws/adapter/codex --include='*.java' \
+            | grep -v '/protocol/CodexMessageCodec.java' || true)
+          if [ -n "$NON_CODEC_JSON" ]; then
+            echo 'JsonNode may only be used within CodexMessageCodec:'
+            echo "$NON_CODEC_JSON"
+            exit 1
+          fi
       - name: Run tests
         run: bash ./mvnw -B test
   frontend:

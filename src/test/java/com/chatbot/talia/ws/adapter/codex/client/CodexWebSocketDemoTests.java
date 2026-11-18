@@ -1,5 +1,11 @@
 package com.chatbot.talia.ws.adapter.codex.client;
 
+import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexWebSocketClient;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
+import com.chatbot.talia.ws.adapter.codex.protocol.CodexRpcSchema;
+import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageReporter;
+
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadListRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadResumeRequest;
@@ -117,7 +123,7 @@ class CodexWebSocketDemoTests {
     }
 
     private void stubTurns(String threadId, String cursor, String json) {
-        ThreadTurnsListResponse turns = mapper.readValue(json, ThreadTurnsListResponse.class);
+        ThreadTurnsListResponse turns = new CodexMessageCodec(mapper).readThreadTurnsListResponse(json);
         when(rpc.send(ThreadTurnsListRequest.create(threadId, cursor), ThreadTurnsListResponse.class))
                 .thenReturn(CompletableFuture.completedFuture(turns));
     }

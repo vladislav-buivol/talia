@@ -1,5 +1,6 @@
 package com.chatbot.talia.ws.core;
 
+import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
 import com.chatbot.talia.ws.core.protocol.ChatAction;
 import com.chatbot.talia.ws.core.protocol.response.ChatMessage;
 import org.slf4j.Logger;
@@ -172,8 +173,10 @@ final class ChatSession {
         send(peer, response);
     }
 
-    private synchronized void approvalRequired(com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt prompt) {
-        if (!threadId.equals(prompt.threadId())) return;
+    private synchronized void approvalRequired(ApprovalCoordinator.ApprovalPrompt prompt) {
+        if (!threadId.equals(prompt.threadId())) {
+            return;
+        }
         ObjectNode event = event("approval.required");
         event.set("approval", mapper.valueToTree(prompt));
         broadcast(event);
@@ -184,7 +187,7 @@ final class ChatSession {
     }
 
     synchronized void resolveApproval(ChatPeer peer, String requestId,
-            com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.Decision decision) {
+            ApprovalCoordinator.Decision decision) {
         if (!peer.id().equals(writerId)) {
             error(peer, "read_only", "Only the writer can resolve approvals");
             return;
@@ -200,7 +203,9 @@ final class ChatSession {
             error(peer, "read_only", "Only the writer can stop a turn");
             return;
         }
-        if (activeTurn == null) return;
+        if (activeTurn == null) {
+            return;
+        }
         String expected = activeTurn;
         Thread.startVirtualThread(() -> {
             try {
@@ -258,7 +263,9 @@ final class ChatSession {
 
     private void completeTurn(String expectedTurnId, ObjectNode response) {
         synchronized (this) {
-            if (!expectedTurnId.equals(activeTurn)) return;
+            if (!expectedTurnId.equals(activeTurn)) {
+                return;
+            }
             activeTurn = null;
             broadcast(response);
         }
@@ -305,7 +312,9 @@ final class ChatSession {
         if (writerId == null) {
             actions.add(ChatAction.CONNECT_AS_WRITER);
         } else if (peer.id().equals(writerId)) {
-            if (activeTurn != null) actions.add(ChatAction.CANCEL_TURN);
+            if (activeTurn != null) {
+                actions.add(ChatAction.CANCEL_TURN);
+            }
             actions.add(ChatAction.RESOLVE_APPROVAL);
             if (activeTurn == null) {
                 actions.addAll(List.of(ChatAction.SEND_MESSAGE, ChatAction.CHANGE_MODEL, ChatAction.FINISH_CHAT,

@@ -1,10 +1,12 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.rpc;
 
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcSuccessResponse;
+
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.Objects;
 
 /** A single JSON-RPC operation; completion, timeout and disconnect all retire its correlation ID. */
 public record PendingRequest<R extends JsonRpcSuccessResponse<?>>(
