@@ -21,6 +21,26 @@ public class CodexMessageCodec {
         this.mapper = mapper;
     }
 
+    public String encodeServerResult(RequestId id, Object result) {
+        tools.jackson.databind.node.ObjectNode reply = mapper.createObjectNode();
+        writeId(reply, id);
+        reply.set("result", mapper.valueToTree(result));
+        return mapper.writeValueAsString(reply);
+    }
+
+    public String encodeServerError(RequestId id, long code, String message) {
+        tools.jackson.databind.node.ObjectNode reply = mapper.createObjectNode();
+        writeId(reply, id);
+        reply.set("error", mapper.valueToTree(new JsonRpcError(code, message, null)));
+        return mapper.writeValueAsString(reply);
+    }
+
+    private static void writeId(tools.jackson.databind.node.ObjectNode reply, RequestId id) {
+        if (id instanceof NumericRequestId number) reply.put("id", number.value());
+        else if (id instanceof StringRequestId string) reply.put("id", string.value());
+        else throw new IllegalArgumentException("Unsupported JSON-RPC request ID");
+    }
+
     public String encode(Object message) {
         return mapper.writeValueAsString(message);
     }

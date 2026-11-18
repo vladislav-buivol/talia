@@ -40,6 +40,7 @@ public class CodexWebSocketClient implements AutoCloseable {
     private final AtomicBoolean handshakeStarted = new AtomicBoolean();
     private volatile boolean initialized;
     private final CodexSettings settings;
+    private final CodexMessageHandlerRegistry handlerRegistry;
 
     @org.springframework.beans.factory.annotation.Autowired
     public CodexWebSocketClient(
@@ -52,9 +53,28 @@ public class CodexWebSocketClient implements AutoCloseable {
     public CodexWebSocketClient(CodexSettings settings, CodexMessageCodec messageCodec,
             CodexMessageHandlerRegistry handlerRegistry) {
         this.settings = settings;
+        this.handlerRegistry = handlerRegistry;
         this.messageCodec = messageCodec;
         this.dispatcher = new CodexMessageDispatcher(messageCodec, handlerRegistry, settings.rpcTimeout());
         this.connection = new CodexWebSocketConnection(settings.url(), dispatcher);
+    }
+
+    public CodexSettings settings() { return settings; }
+
+    public void onServerRequest(java.util.function.Consumer<CodexMessageCodec.ServerRequest> callback) {
+        handlerRegistry.onServerRequest(callback);
+    }
+
+    public CompletableFuture<Void> sendServerResult(CodexMessageCodec.RequestId id, Object result) {
+        Throwable error = checkReady();
+        return error != null ? CompletableFuture.failedFuture(error)
+                : connection.send(messageCodec.encodeServerResult(id, result));
+    }
+
+    public CompletableFuture<Void> sendServerError(CodexMessageCodec.RequestId id, long code, String message) {
+        Throwable error = checkReady();
+        return error != null ? CompletableFuture.failedFuture(error)
+                : connection.send(messageCodec.encodeServerError(id, code, message));
     }
 
     public CompletableFuture<InitializeResponse> connectAndInitialize(String name, String title, String version) {

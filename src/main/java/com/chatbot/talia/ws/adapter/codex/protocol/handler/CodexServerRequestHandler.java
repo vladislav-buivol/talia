@@ -11,13 +11,20 @@ public final class CodexServerRequestHandler
         implements MessageHandler<CodexMessageCodec.ServerRequest> {
 
     private final CodexMessageReporter reporter;
+    private volatile java.util.function.Consumer<CodexMessageCodec.ServerRequest> receiver;
 
     public CodexServerRequestHandler(CodexMessageReporter reporter) {
         this.reporter = reporter;
     }
 
+    public void setReceiver(java.util.function.Consumer<CodexMessageCodec.ServerRequest> receiver) {
+        this.receiver = receiver;
+    }
+
     @Override
     public void handle(CodexMessageCodec.ServerRequest request) {
-        reporter.reportServerRequest(request);
+        var current = receiver;
+        if (current == null) reporter.reportServerRequest(request);
+        else current.accept(request);
     }
 }
