@@ -2,6 +2,7 @@
 package com.chatbot.talia.ws.adapter.codex.listener;
 
 import com.chatbot.talia.ws.adapter.codex.client.CodexMessageDispatcher;
+import com.chatbot.talia.ws.adapter.codex.client.CodexSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,9 +23,18 @@ public class CodexWebSocketListener implements WebSocket.Listener {
     private final Consumer<Throwable> onPeerClose;
     private final Consumer<Throwable> onFailure;
     private final StringBuilder fragments = new StringBuilder();
+    private final int maxMessageBytes;
+    private int accumulatedBytes;
 
     public CodexWebSocketListener(CodexMessageDispatcher dispatcher,
                                   Consumer<Throwable> onPeerClose, Consumer<Throwable> onFailure) {
+        this(dispatcher, onPeerClose, onFailure, CodexSettings.DEFAULT_MAX_MESSAGE_BYTES);
+    }
+
+    public CodexWebSocketListener(CodexMessageDispatcher dispatcher,
+                                  Consumer<Throwable> onPeerClose, Consumer<Throwable> onFailure,
+                                  int maxMessageBytes) {
+        this.maxMessageBytes = maxMessageBytes;
         this.dispatcher = Objects.requireNonNull(dispatcher);
         this.onPeerClose = Objects.requireNonNull(onPeerClose);
         this.onFailure = Objects.requireNonNull(onFailure);
@@ -38,11 +48,19 @@ public class CodexWebSocketListener implements WebSocket.Listener {
 
     @Override
     public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+        accumulatedBytes += data.toString().getBytes(StandardCharsets.UTF_8).length;
+        if (accumulatedBytes > maxMessageBytes) {
+            fragments.setLength(0);
+            accumulatedBytes = 0;
+            onFailure.accept(new IOException("Codex WebSocket message exceeds configured limit"));
+            return WebSocket.Listener.super.onText(webSocket, data, last);
+        }
         fragments.append(data);
 
         if (last) {
             String json = fragments.toString();
             fragments.setLength(0);
+            accumulatedBytes = 0;
 
             try {
                 dispatcher.onTextMessage(json);

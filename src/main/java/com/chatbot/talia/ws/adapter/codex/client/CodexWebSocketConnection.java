@@ -18,17 +18,13 @@ import java.util.function.BooleanSupplier;
 
 public class CodexWebSocketConnection implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CodexWebSocketConnection.class);
-    static final int SEND_QUEUE_CAPACITY = 64;
-    private static final long CLOSE_TIMEOUT_SECONDS = 2;
+    static final int SEND_QUEUE_CAPACITY = CodexSettings.DEFAULT_SEND_QUEUE_CAPACITY;
     private final URI serverAddress;
     private final CodexSettings settings;
     private final WebSocket.Listener listener;
     private final HttpClient httpClient;
     private final CodexMessageDispatcher dispatcher;
-    private final ExecutorService sender = new ThreadPoolExecutor(
-            1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(SEND_QUEUE_CAPACITY),
-            Thread.ofVirtual().name("codex-sender").factory()
-    );
+    private final ExecutorService sender;
     private final Set<CompletableFuture<?>> pendingSends = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean cleanupStarted = new AtomicBoolean();
     private final CompletableFuture<Void> closeCompletion = new CompletableFuture<>();
@@ -49,8 +45,11 @@ public class CodexWebSocketConnection implements AutoCloseable {
     CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher, HttpClient httpClient, CodexSettings settings) {
         this.serverAddress = serverAddress;
         this.settings = settings;
+        this.sender = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(settings.sendQueueCapacity()),
+                Thread.ofVirtual().name("codex-sender").factory());
         this.dispatcher = dispatcher;
-        this.listener = new CodexWebSocketListener(dispatcher, this::onPeerClose, this::abort);
+        this.listener = new CodexWebSocketListener(dispatcher, this::onPeerClose, this::abort, settings.maxMessageBytes());
         this.httpClient = httpClient;
     }
 
@@ -168,7 +167,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         try {
             socket.sendClose(WebSocket.NORMAL_CLOSURE, "")
                     .copy()
-                    .orTimeout(CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .orTimeout(settings.closeTimeout().toMillis(), TimeUnit.MILLISECONDS)
                     .whenComplete((closed, error) -> finishClose(socket,
                             error instanceof CompletionException && error.getCause() != null ? error.getCause() : error));
         } catch (RuntimeException error) {
