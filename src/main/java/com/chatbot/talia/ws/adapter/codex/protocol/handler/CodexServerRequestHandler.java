@@ -23,7 +23,7 @@ public final class CodexServerRequestHandler
 
     @Override
     public void handle(CodexMessageCodec.ServerRequest request) {
-        var current = receiver;
+        java.util.function.Consumer<CodexMessageCodec.ServerRequest> current = receiver;
         if (current == null) reporter.reportServerRequest(request);
         else current.accept(request);
     }

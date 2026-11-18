@@ -2,6 +2,7 @@ package com.chatbot.talia.ws.adapter.codex.client;
 
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.ServerRequestMethod;
+import tools.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -40,9 +41,9 @@ public final class ApprovalCoordinator implements AutoCloseable {
 
     public void onNotification(CodexMessageCodec.Notification notification) {
         if (notification.method() != com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod.SERVER_REQUEST_RESOLVED) return;
-        var params = notification.params();
+        JsonNode params = notification.params();
         if (params == null) return;
-        var rawId = params.path("requestId");
+        JsonNode rawId = params.path("requestId");
         String id = rawId.isIntegralNumber() ? "n:" + rawId.asLong()
                 : rawId.isString() ? "s:" + rawId.asString() : null;
         if (id != null && pending.remove(id) != null) resolved(id);
@@ -68,7 +69,7 @@ public final class ApprovalCoordinator implements AutoCloseable {
             client.sendServerError(request.id(), -32601, "Unsupported server request: " + request.wireMethod());
             return;
         }
-        var params = request.params();
+        JsonNode params = request.params();
         if (params == null || !params.path("threadId").isString()) {
             client.sendServerError(request.id(), -32602, "Missing approval threadId");
             return;

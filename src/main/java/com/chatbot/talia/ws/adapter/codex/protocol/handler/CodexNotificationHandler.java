@@ -24,7 +24,7 @@ public final class CodexNotificationHandler
     @Override
     public void handle(CodexMessageCodec.Notification notification) {
         reporter.reportNotification(notification);
-        var current = listener;
+        java.util.function.Consumer<CodexMessageCodec.Notification> current = listener;
         if (current != null) current.accept(notification);
     }
 }
