@@ -4,7 +4,7 @@ import type { Action, ChatEvent, ChatMessage, ChatRequest, Dialog } from "./prot
 const labels: Record<Action, string> = {
   startNewDialog: "New chat", continueDialog: "Select chat", getDialogs: "Load chats",
   getHistory: "Load history", getModels: "Load models", sendMessage: "Send message", changeModel: "Change model",
-  closeChat: "Leave chat", finishChat: "Finish chat", connectAsReader: "Join as reader",
+  closeChat: "Leave chat", finishChat: "Finish chat", cancelTurn: "Stop", connectAsReader: "Join as reader",
   connectAsWriter: "Join as writer", transferWriter: "Transfer writer",
   deleteChat: "Delete chat", closeChatAndDelete: "Leave & delete",
   finishChatAndDelete: "Finish & delete",
@@ -64,7 +64,7 @@ export default function App() {
     const pendingReplies: Record<string, string[]> = {
       startNewDialog: ["session.joined"], continueDialog: ["dialog.selected"],
       getDialogs: ["dialogs"], getHistory: ["history"], sendMessage: ["user.text"],
-      getModels: ["models"],
+      getModels: ["models"], cancelTurn: ["assistant.text.done"],
       changeModel: ["model.changed"], closeChat: ["chat.closed"], finishChat: ["chat.finished"],
       connectAsReader: ["session.joined"], connectAsWriter: ["session.joined", "writer.changed"],
       transferWriter: ["writer.changed"], deleteChat: ["chat.deleted"],
@@ -224,7 +224,8 @@ export default function App() {
         else setError("Choose or enter a connected client ID first.");
         break;
       case "closeChat":
-      case "finishChat": send({ type: "POST", action }); break;
+      case "finishChat":
+      case "cancelTurn": send({ type: "POST", action }); break;
       case "deleteChat": send({ type: "DELETE", action, ...(threadId ? { threadId } : {}) }); break;
       case "closeChatAndDelete":
       case "finishChatAndDelete": send({ type: "DELETE", action }); break;
@@ -291,6 +292,7 @@ export default function App() {
             {messages.length === 0 ? <div className="empty-state"><div className="empty-icon">✳</div><span className="eyebrow">{thread ? "START THE CONVERSATION" : "WELCOME TO TALIA"}</span><h3>{thread ? "A fresh page." : "Good to see you here."}</h3><p>{thread ? "Your messages and replies will appear here." : "Your conversations live here. Connect to Talia to get started."}</p></div> :
               <div className="messages">{messages.map((message, index) => <article className={`message ${message.role === "USER" ? "user" : "assistant"}`} key={index}><div className="avatar">{message.role === "USER" ? "Y" : "✳"}</div><div className="message-content"><div className="message-label">{message.role === "USER" ? "YOU" : "TALIA"}</div><div className="bubble">{message.text}</div></div></article>)}<div ref={bottom} /></div>}
           </div>
+          {thread && available("cancelTurn") && <button className="button danger" onClick={() => perform("cancelTurn")}>Stop generation</button>}
           {thread && <div className="toolbar">
             {available("getHistory") && <button className="tool-button" disabled={!!pending} onClick={() => perform("getHistory")}>↻ History</button>}
             {available("connectAsWriter") && <button className="tool-button" disabled={!!pending} onClick={() => perform("connectAsWriter")}>Become writer</button>}

@@ -1,6 +1,6 @@
 export type Action =
   | "startNewDialog" | "continueDialog" | "getDialogs" | "getHistory" | "getModels"
-  | "sendMessage" | "changeModel" | "closeChat" | "finishChat"
+  | "sendMessage" | "cancelTurn" | "changeModel" | "closeChat" | "finishChat"
   | "connectAsReader" | "connectAsWriter" | "transferWriter"
   | "deleteChat" | "closeChatAndDelete" | "finishChatAndDelete";
 
@@ -48,6 +48,7 @@ export type ChatRequest =
   | { type: "POST"; action: "continueDialog"; threadId: string }
   | { type: "POST"; action: "connectAsReader" | "connectAsWriter"; threadId?: string }
   | { type: "POST"; action: "sendMessage"; text: string }
+  | { type: "POST"; action: "cancelTurn" }
   | { type: "POST"; action: "changeModel"; model: string }
   | { type: "POST"; action: "transferWriter"; clientId: string }
   | { type: "POST"; action: "closeChat" | "finishChat" }

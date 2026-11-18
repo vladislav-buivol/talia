@@ -36,6 +36,10 @@ public interface ChatBackend {
 
         void delete() throws InterruptedException, ExecutionException;
 
+        default void interrupt() throws InterruptedException, ExecutionException {
+            throw new UnsupportedOperationException("Backend does not support interrupt");
+        }
+
         @Override
         void close();
     }

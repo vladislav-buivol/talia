@@ -9,6 +9,8 @@ import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializedNotification;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadUnsubscribeRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnStartRequest;
+import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnInterruptRequest;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.TurnInterruptResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.InitializeResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcSuccessResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadUnsubscribeResponse;
@@ -151,12 +153,18 @@ public class CodexWebSocketClient implements AutoCloseable {
         }
 
         String threadId = request.params().threadId();
-        CodexTurn turn = new CodexTurn(onText);
+        CodexTurn turn = new CodexTurn(onText, settings.maxEarlyNotifications(), settings.turnStartTimeout(),
+                id -> send(TurnInterruptRequest.create(threadId, id), TurnInterruptResponse.class).thenApply(ignored -> null));
         if (!dispatcher.registerTurn(threadId, turn)) {
             return CompletableFuture.failedFuture(new IllegalStateException("Already tracking a turn on thread " + threadId));
         }
         sendRequest(request, turn.startRequest());
         return turn.result();
+    }
+
+    public CompletableFuture<Void> interruptTurn(String threadId) {
+        CodexTurn turn = dispatcher.trackedTurn(threadId);
+        return turn == null ? CompletableFuture.completedFuture(null) : turn.interrupt();
     }
 
     /** Unsubscribes this connection while preserving the conversation and its history. */

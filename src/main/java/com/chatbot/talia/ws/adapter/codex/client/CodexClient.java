@@ -90,6 +90,10 @@ public class CodexClient implements AutoCloseable {
                 .thenApply(CodexClient::conversationPage);
     }
 
+    public CompletableFuture<Void> interruptTurn(String threadId) {
+        return rpc.interruptTurn(threadId);
+    }
+
     /** Streams text on the WebSocket listener thread and returns the terminal turn outcome. */
     public CompletableFuture<CodexTurnResult> runTurn(String threadId, String prompt, Consumer<String> onText) {
         return rpc.runTurn(TurnStartRequest.create(threadId, prompt), onText);

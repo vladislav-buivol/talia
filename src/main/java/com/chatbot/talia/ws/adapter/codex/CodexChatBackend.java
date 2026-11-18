@@ -152,6 +152,11 @@ public final class CodexChatBackend implements ChatBackend {
         }
 
         @Override
+        public void interrupt() throws InterruptedException, ExecutionException {
+            initializedClient().interruptTurn(threadId).get();
+        }
+
+        @Override
         public void delete() throws InterruptedException, ExecutionException {
             initializedClient().deleteConversation(threadId).get();
         }

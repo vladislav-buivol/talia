@@ -170,6 +170,31 @@ final class ChatSession {
         send(peer, response);
     }
 
+    synchronized void cancel(ChatPeer peer) {
+        if (!peer.id().equals(writerId)) {
+            error(peer, "read_only", "Only the writer can stop a turn");
+            return;
+        }
+        if (activeTurn == null) return;
+        String expected = activeTurn;
+        Thread.startVirtualThread(() -> {
+            try {
+                conversation.interrupt();
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                reportInterruptFailure(expected);
+            } catch (ExecutionException | RuntimeException failure) {
+                reportInterruptFailure(expected);
+            }
+        });
+    }
+
+    private synchronized void reportInterruptFailure(String expected) {
+        if (expected.equals(activeTurn))
+            broadcast(event("error").put("turnId", expected).put("code", "interrupt_failed")
+                    .put("message", "Could not interrupt Codex turn"));
+    }
+
     synchronized void write(ChatPeer peer, String text) {
         if (!canWrite(peer)) {
             return;
@@ -189,7 +214,7 @@ final class ChatSession {
         try {
             Consumer<String> stream = delta -> broadcast(event("assistant.text.delta").put("turnId", turnId).put("text", delta));
             ChatBackend.TurnResult result = conversation.runTurn(text, selectedModel, stream);
-            completeTurn(event("assistant.text.done").put("turnId", turnId)
+            completeTurn(turnId, event("assistant.text.done").put("turnId", turnId)
                     .put("codexTurnId", result.turnId()).put("status", result.status())
                     .put("errorMessage", result.errorMessage()));
         } catch (InterruptedException error) {
@@ -202,12 +227,13 @@ final class ChatSession {
 
     private void failTurn(String turnId, Exception error) {
         log.debug("Chat turn failed for {}", threadId, error);
-        completeTurn(event("error").put("turnId", turnId).put("code", "turn_failed")
+        completeTurn(turnId, event("error").put("turnId", turnId).put("code", "turn_failed")
                 .put("message", "Could not complete the chat turn"));
     }
 
-    private void completeTurn(ObjectNode response) {
+    private void completeTurn(String expectedTurnId, ObjectNode response) {
         synchronized (this) {
+            if (!expectedTurnId.equals(activeTurn)) return;
             activeTurn = null;
             broadcast(response);
         }
@@ -254,6 +280,7 @@ final class ChatSession {
         if (writerId == null) {
             actions.add(ChatAction.CONNECT_AS_WRITER);
         } else if (peer.id().equals(writerId)) {
+            if (activeTurn != null) actions.add(ChatAction.CANCEL_TURN);
             if (activeTurn == null) {
                 actions.addAll(List.of(ChatAction.SEND_MESSAGE, ChatAction.CHANGE_MODEL, ChatAction.FINISH_CHAT,
                         ChatAction.DELETE_CHAT, ChatAction.CLOSE_CHAT_AND_DELETE, ChatAction.FINISH_CHAT_AND_DELETE));

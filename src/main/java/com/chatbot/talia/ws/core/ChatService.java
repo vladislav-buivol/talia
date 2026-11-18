@@ -58,6 +58,7 @@ public final class ChatService implements AutoCloseable {
             switch (request) {
                 case GetHistoryRequest history -> chat.history(peer, history.limit() == null ? 50 : history.limit());
                 case SendMessageRequest message -> chat.write(peer, message.text() == null ? "" : message.text());
+                case CancelTurnRequest ignored -> chat.cancel(peer);
                 case ChangeModelRequest change -> {
                     if (change.model() == null || !backend.supportsModel(change.model())) {
                         chat.error(peer, "invalid_model", "A supported model is required");
