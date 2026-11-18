@@ -24,7 +24,14 @@ import static org.mockito.Mockito.when;
 
 class CodexWebSocketDemoTests {
     private final CodexWebSocketClient rpc = mock(CodexWebSocketClient.class);
-    private final CodexClient client = new CodexClient(rpc);
+    private final CodexClient client;
+
+    {
+        when(rpc.settings()).thenReturn(CodexSettings.local(java.net.URI.create("ws://127.0.0.1:4222")));
+        org.mockito.Mockito.doNothing().when(rpc).onServerRequest(org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.doNothing().when(rpc).onNotification(org.mockito.ArgumentMatchers.any());
+        client = new CodexClient(rpc);
+    }
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
