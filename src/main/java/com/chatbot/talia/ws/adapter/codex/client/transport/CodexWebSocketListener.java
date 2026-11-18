@@ -1,4 +1,3 @@
-
 package com.chatbot.talia.ws.adapter.codex.client.transport;
 
 import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexMessageDispatcher;
@@ -10,14 +9,13 @@ import java.io.IOException;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
-import java.util.Objects;
 
 public class CodexWebSocketListener implements WebSocket.Listener {
 
-    private static final Logger log =
-            LoggerFactory.getLogger(CodexWebSocketListener.class);
+    private static final Logger log = LoggerFactory.getLogger(CodexWebSocketListener.class);
 
     private final CodexMessageDispatcher dispatcher;
     private final Consumer<Throwable> onPeerClose;
@@ -110,7 +108,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
         WebSocket.Listener.super.onError(webSocket, error);
     }
 
-    private String convertToString(ByteBuffer message) {
+    private static String convertToString(ByteBuffer message) {
         return StandardCharsets.UTF_8.decode(message.duplicate()).toString();
     }
 }
