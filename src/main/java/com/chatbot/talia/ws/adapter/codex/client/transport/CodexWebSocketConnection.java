@@ -6,12 +6,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
-import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CompletableFuture;
@@ -28,7 +27,6 @@ import java.util.Set;
 
 public class CodexWebSocketConnection implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CodexWebSocketConnection.class);
-    static final int SEND_QUEUE_CAPACITY = CodexSettings.DEFAULT_SEND_QUEUE_CAPACITY;
     private final URI serverAddress;
     private final CodexSettings settings;
     private final WebSocket.Listener listener;
