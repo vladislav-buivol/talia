@@ -1,9 +1,9 @@
 package com.chatbot.talia.ws.adapter.codex;
 
-import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
 import com.chatbot.talia.ws.adapter.codex.client.CodexClient;
 import com.chatbot.talia.ws.adapter.codex.client.CodexTurnResult;
 import com.chatbot.talia.ws.adapter.codex.client.ConversationHistory;
+import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest.ClientInfo;
 import com.chatbot.talia.ws.core.ChatBackend;
@@ -114,25 +114,29 @@ public final class CodexChatBackend implements ChatBackend {
         @Override
         public TurnResult runTurn(String text, String model, Consumer<String> onText)
                 throws InterruptedException, ExecutionException {
-            CodexClient current = initializedClient();
-            if (resumedClient != current) {
-                current.resumeConversation(threadId).get();
-                resumedClient = current;
-            }
-            java.util.concurrent.CompletableFuture<CodexTurnResult> active;
-            synchronized (this) {
-                active = model == null
-                        ? current.runTurn(threadId, text, onText)
-                        : current.runTurn(threadId, text, CodexModel.fromId(model), onText);
-                if (interruptRequested) {
-                    current.interruptTurn(threadId);
-                }
-            }
             try {
+                CodexClient current = initializedClient();
+                if (resumedClient != current) {
+                    current.resumeConversation(threadId).get();
+                    resumedClient = current;
+                }
+
+                CompletableFuture<CodexTurnResult> active;
+                synchronized (this) {
+                    active = model == null
+                            ? current.runTurn(threadId, text, onText)
+                            : current.runTurn(threadId, text, CodexModel.fromId(model), onText);
+                    if (interruptRequested) {
+                        current.interruptTurn(threadId);
+                    }
+                }
+
                 CodexTurnResult result = active.get();
                 return new TurnResult(result.turnId(), result.status(), result.errorMessage());
             } finally {
-                synchronized (this) { interruptRequested = false; }
+                synchronized (this) {
+                    interruptRequested = false;
+                }
             }
         }
 
