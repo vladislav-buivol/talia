@@ -31,12 +31,12 @@ model dropdown shows models supported by the backend's `CodexModel` enum.
 | Class | Responsibility in the current code |
 | --- | --- |
 | [`CodexClient`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexClient.java) | Opens a session and provides conversation, history, and turn operations. |
-| [`CodexWebSocketClient`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexWebSocketClient.java) | Owns the RPC session, runs the handshake, and registers typed requests before sending them. |
-| [`CodexRpcSchema`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexRpcSchema.java) | Reads the RPC method catalog from a Codex-generated schema file. |
-| [`CodexWebSocketConnection`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexWebSocketConnection.java) | Opens the outbound WebSocket, queues text sends, sends pings, and owns the sender executor and HTTP client. |
-| [`SendTask`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/SendTask.java) | Sends one text message on the executor and completes a future when the send finishes or fails. |
-| [`CodexWebSocketListener`](../src/main/java/com/chatbot/talia/ws/adapter/codex/listener/CodexWebSocketListener.java) | Assembles WebSocket text fragments for the dispatcher and forwards close and error events to the connection. |
-| [`CodexMessageDispatcher`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/CodexMessageDispatcher.java) | Tracks pending requests for one connection, completes their futures, and routes other messages through the handler registry. |
+| [`CodexWebSocketClient`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/rpc/CodexWebSocketClient.java) | Owns the RPC session, runs the handshake, and registers typed requests before sending them. |
+| [`CodexRpcSchema`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/CodexRpcSchema.java) | Reads the RPC method catalog from a Codex-generated schema file. |
+| [`CodexWebSocketConnection`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/transport/CodexWebSocketConnection.java) | Opens the outbound WebSocket, queues text sends, sends pings, and owns the sender executor and HTTP client. |
+| [`SendTask`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/transport/SendTask.java) | Sends one text message on the executor and completes a future when the send finishes or fails. |
+| [`CodexWebSocketListener`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/transport/CodexWebSocketListener.java) | Assembles WebSocket text fragments for the dispatcher and forwards close and error events to the connection. |
+| [`CodexMessageDispatcher`](../src/main/java/com/chatbot/talia/ws/adapter/codex/client/rpc/CodexMessageDispatcher.java) | Tracks pending requests for one connection, completes their futures, and routes other messages through the handler registry. |
 | [`CodexMessageCodec`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/CodexMessageCodec.java) | Uses Jackson's `ObjectMapper` to encode outgoing messages and decode incoming notifications, server requests, and responses. |
 | [`JsonRpcRequest<P>` and `CodexRequest<P>`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/request/JsonRpcRequest.java) | Define the `id`, `method`, and typed `params` exposed by a request. `CodexRequest` extends that interface. |
 | [`InitializeRequest`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/request/InitializeRequest.java) and [`CodexMethod`](../src/main/java/com/chatbot/talia/ws/adapter/codex/protocol/request/CodexMethod.java) | Represent the initialization request and its protocol method name. |
@@ -123,9 +123,9 @@ CodexWebSocketConnection.send(json)
            └─ socket.sendText(json, true)
 ```
 
-The client allocates increasing request IDs for the lifetime of the connection. It encodes each request before registration, so encoding failures complete the returned future without creating a pending entry. Each registered future has a ten-second timeout and removes its map entry on completion.
+The client allocates increasing request IDs for the lifetime of the connection. It encodes each request before registration, so encoding failures complete the returned future without creating a pending entry. Each registered future has a configurable timeout and removes its map entry on completion (`talia.codex.rpc-timeout`, `turn-start-timeout` and `interrupt-timeout`).
 
-The connection uses one virtual thread to send text messages in order. It accepts up to 64 queued messages while another send is active. When the queue fills, new text sends fail with `RejectedExecutionException`. Ping is sent directly through `sendPing`.
+The connection uses one virtual thread to send text messages in order. It accepts up to `talia.codex.send-queue-capacity` queued messages while another send is active (64 by default). When the queue fills, new text sends fail with `RejectedExecutionException`. Ping is sent directly through `sendPing`.
 
 ## Two futures, two results
 
