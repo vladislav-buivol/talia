@@ -55,6 +55,43 @@ class CodexTurnCancellationTests {
         assertEquals("completed", turn.result().join().status());
     }
 
+    @Test
+    void staleCompletedNotificationCannotFinishANewTurn() {
+        CodexTurn turn = new CodexTurn(text -> {
+        }, 8, Duration.ofSeconds(30), id -> CompletableFuture.completedFuture(null));
+
+        turn.startRequest().future().complete(new TurnStartResponse(1L,
+                new TurnStartResponse.Result(new TurnStartResponse.TurnInfo("new-turn", "inProgress"))));
+
+        turn.onNotification(notification(NotificationMethod.TURN_COMPLETED, "turn/completed", """
+                {"threadId":"thread","turn":{"id":"old-turn","status":"completed"}}
+                """));
+        assertFalse(turn.result().isDone());
+
+        turn.onNotification(notification(NotificationMethod.TURN_COMPLETED, "turn/completed", """
+                {"threadId":"thread","turn":{"id":"new-turn","status":"completed"}}
+                """));
+        assertEquals("completed", turn.result().join().status());
+    }
+
+    @Test
+    void earlyNotificationBufferIsBounded() {
+        CodexTurn turn = new CodexTurn(text -> {
+        }, 1, Duration.ofSeconds(30), id -> CompletableFuture.completedFuture(null));
+
+        turn.onNotification(notification(NotificationMethod.ITEM_AGENT_MESSAGE_DELTA,
+                "item/agentMessage/delta", """
+                {"threadId":"thread","turnId":"pending-turn","delta":"first"}
+                """));
+        assertFalse(turn.result().isDone());
+
+        turn.onNotification(notification(NotificationMethod.ITEM_AGENT_MESSAGE_DELTA,
+                "item/agentMessage/delta", """
+                {"threadId":"thread","turnId":"pending-turn","delta":"second"}
+                """));
+        assertTrue(turn.result().isCompletedExceptionally());
+    }
+
     private CodexMessageCodec.Notification notification(NotificationMethod method, String name, String json) {
         return (CodexMessageCodec.Notification) new CodexMessageCodec(mapper)
                 .decode("{\"method\":\"" + name + "\",\"params\":" + json + "}", id -> null);
