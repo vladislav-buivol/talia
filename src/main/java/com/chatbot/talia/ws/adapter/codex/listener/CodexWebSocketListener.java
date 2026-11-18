@@ -44,8 +44,12 @@ public class CodexWebSocketListener implements WebSocket.Listener {
             String json = fragments.toString();
             fragments.setLength(0);
 
-            log.debug("WebSocket text received: {}", json);
-            dispatcher.onTextMessage(json);
+            try {
+                dispatcher.onTextMessage(json);
+            } catch (RuntimeException error) {
+                log.warn("Malformed or unhandled Codex protocol message", error);
+                onFailure.accept(error);
+            }
         }
 
         return WebSocket.Listener.super.onText(webSocket, data, last);

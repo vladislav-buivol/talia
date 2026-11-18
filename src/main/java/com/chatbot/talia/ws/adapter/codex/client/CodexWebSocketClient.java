@@ -56,7 +56,7 @@ public class CodexWebSocketClient implements AutoCloseable {
         this.handlerRegistry = handlerRegistry;
         this.messageCodec = messageCodec;
         this.dispatcher = new CodexMessageDispatcher(messageCodec, handlerRegistry, settings.rpcTimeout());
-        this.connection = new CodexWebSocketConnection(settings.url(), dispatcher);
+        this.connection = new CodexWebSocketConnection(settings.url(), dispatcher, settings);
     }
 
     public CodexSettings settings() { return settings; }

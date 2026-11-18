@@ -15,6 +15,7 @@ public class SendTask implements Runnable {
     private final WebSocket socket;
     private final BooleanSupplier requestFinished;
     private final Consumer<Throwable> onSendTimeout;
+    private final java.time.Duration sendTimeout;
 
     SendTask(String message, CompletableFuture<Void> result, WebSocket socket,
              BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout) {
@@ -23,6 +24,17 @@ public class SendTask implements Runnable {
         this.socket = socket;
         this.requestFinished = requestFinished;
         this.onSendTimeout = onSendTimeout;
+        this.sendTimeout = java.time.Duration.ofSeconds(10);
+    }
+
+    SendTask(String message, CompletableFuture<Void> result, WebSocket socket,
+             BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout, java.time.Duration timeout) {
+        this.message = message;
+        this.result = result;
+        this.socket = socket;
+        this.requestFinished = requestFinished;
+        this.onSendTimeout = onSendTimeout;
+        this.sendTimeout = timeout;
     }
 
     @Override
@@ -35,7 +47,7 @@ public class SendTask implements Runnable {
             return;
         }
         try {
-            socket.sendText(message, true).get(10, TimeUnit.SECONDS);
+            socket.sendText(message, true).get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
             result.complete(null);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();

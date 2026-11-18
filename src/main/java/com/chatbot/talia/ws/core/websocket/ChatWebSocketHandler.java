@@ -38,7 +38,7 @@ public final class ChatWebSocketHandler extends TextWebSocketHandler implements 
 
     @Override
     protected void handleTextMessage(WebSocketSession socket, TextMessage message) {
-        log.info("[BACKEND] >>> {}", message.getPayload());
+        log.trace("Incoming Talia chat request");
         ChatRequest request;
         try {
             JsonNode json = mapper.readTree(message.getPayload());

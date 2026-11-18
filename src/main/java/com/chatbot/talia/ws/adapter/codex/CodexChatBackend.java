@@ -79,6 +79,7 @@ public final class CodexChatBackend implements ChatBackend {
         private CompletableFuture<Void> ready;
         private CodexClient resumedClient;
         private boolean closed;
+        private boolean interruptRequested;
         private java.util.function.Consumer<com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt> approvalListener = prompt -> {};
 
         CodexConversation(String threadId, CodexClient startedClient) {
@@ -113,10 +114,19 @@ public final class CodexChatBackend implements ChatBackend {
                 current.resumeConversation(threadId).get();
                 resumedClient = current;
             }
-            CodexTurnResult result = model == null
-                    ? current.runTurn(threadId, text, onText).get()
-                    : current.runTurn(threadId, text, CodexModel.fromId(model), onText).get();
-            return new TurnResult(result.turnId(), result.status(), result.errorMessage());
+            java.util.concurrent.CompletableFuture<CodexTurnResult> active;
+            synchronized (this) {
+                active = model == null
+                        ? current.runTurn(threadId, text, onText)
+                        : current.runTurn(threadId, text, CodexModel.fromId(model), onText);
+                if (interruptRequested) current.interruptTurn(threadId);
+            }
+            try {
+                CodexTurnResult result = active.get();
+                return new TurnResult(result.turnId(), result.status(), result.errorMessage());
+            } finally {
+                synchronized (this) { interruptRequested = false; }
+            }
         }
 
         private CodexClient initializedClient() throws InterruptedException, ExecutionException {
@@ -168,7 +178,12 @@ public final class CodexChatBackend implements ChatBackend {
 
         @Override
         public void interrupt() throws InterruptedException, ExecutionException {
-            initializedClient().interruptTurn(threadId).get();
+            CodexClient current;
+            synchronized (this) {
+                interruptRequested = true;
+                current = client;
+            }
+            if (current != null && !current.isClosed()) current.interruptTurn(threadId).get();
         }
 
         @Override
