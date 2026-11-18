@@ -8,7 +8,7 @@ Build a conversational assistant that accepts text and, later, microphone input;
 
 - Spring connects to a Codex app server through a WebSocket client and streams response deltas.
 - A WebSocket endpoint exists at `/ws/chat`, and a separate HTTP chat controller exists.
-- The current WebSocket client holds one shared Codex thread and allows one active turn. It does not yet provide per-user isolation or cancellation.
+- The text WebSocket path supports multiple named Codex conversations, one writer per active chat, streamed replies, and basic `cancelTurn`/`turn/interrupt` handling. It does not transparently resume an in-progress turn after the server connection drops.
 - The HTTP controller uses a separate Codex CLI process; verify its behavior and profile wiring before treating it as the main conversation interface.
 - Speech synthesis, microphone input, playback and interruption handling still need to be built and verified.
 
