@@ -79,10 +79,12 @@ public final class CodexChatBackend implements ChatBackend {
         private CompletableFuture<Void> ready;
         private CodexClient resumedClient;
         private boolean closed;
+        private java.util.function.Consumer<com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt> approvalListener = prompt -> {};
 
         CodexConversation(String threadId, CodexClient startedClient) {
             this.threadId = threadId;
             client = startedClient;
+            if (client != null) client.onApproval(approvalListener);
             resumedClient = startedClient;
             ready = CompletableFuture.completedFuture(null);
         }
@@ -125,7 +127,9 @@ public final class CodexChatBackend implements ChatBackend {
                     throw new IllegalStateException("Conversation is closed");
                 }
                 if (client == null || client.isClosed() || ready.isCompletedExceptionally()) {
+                    if (client != null) client.close();
                     client = clients.get();
+                    client.onApproval(approvalListener);
                     ready = new CompletableFuture<>();
                     CodexClient connecting = client;
                     CompletableFuture<Void> completion = ready;
@@ -136,6 +140,17 @@ public final class CodexChatBackend implements ChatBackend {
             }
             connection.get();
             return current;
+        }
+
+        @Override
+        public synchronized void onApproval(java.util.function.Consumer<com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt> listener) {
+            approvalListener = listener;
+            if (client != null) client.onApproval(listener);
+        }
+
+        @Override
+        public synchronized boolean resolveApproval(String requestId, com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.Decision decision) {
+            return client != null && client.resolveApproval(requestId, decision);
         }
 
         private void initialize(CodexClient connecting, CompletableFuture<Void> completion) {

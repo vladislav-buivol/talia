@@ -32,6 +32,7 @@ final class ChatSession {
         this.conversation = conversation;
         this.model = model;
         this.onIdle = onIdle;
+        conversation.onApproval(this::approvalRequired);
     }
 
     String threadId() {
@@ -170,6 +171,26 @@ final class ChatSession {
         send(peer, response);
     }
 
+    private synchronized void approvalRequired(com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.ApprovalPrompt prompt) {
+        if (!threadId.equals(prompt.threadId())) return;
+        ObjectNode event = event("approval.required");
+        event.set("approval", mapper.valueToTree(prompt));
+        broadcast(event);
+    }
+
+    synchronized void resolveApproval(ChatPeer peer, String requestId,
+            com.chatbot.talia.ws.adapter.codex.client.ApprovalCoordinator.Decision decision) {
+        if (!peer.id().equals(writerId)) {
+            error(peer, "read_only", "Only the writer can resolve approvals");
+            return;
+        }
+        if (decision == null || !conversation.resolveApproval(requestId, decision)) {
+            error(peer, "approval_unavailable", "Approval was already resolved or is unavailable");
+            return;
+        }
+        broadcast(event("approval.resolved").put("requestId", requestId));
+    }
+
     synchronized void cancel(ChatPeer peer) {
         if (!peer.id().equals(writerId)) {
             error(peer, "read_only", "Only the writer can stop a turn");
@@ -281,6 +302,7 @@ final class ChatSession {
             actions.add(ChatAction.CONNECT_AS_WRITER);
         } else if (peer.id().equals(writerId)) {
             if (activeTurn != null) actions.add(ChatAction.CANCEL_TURN);
+            actions.add(ChatAction.RESOLVE_APPROVAL);
             if (activeTurn == null) {
                 actions.addAll(List.of(ChatAction.SEND_MESSAGE, ChatAction.CHANGE_MODEL, ChatAction.FINISH_CHAT,
                         ChatAction.DELETE_CHAT, ChatAction.CLOSE_CHAT_AND_DELETE, ChatAction.FINISH_CHAT_AND_DELETE));
