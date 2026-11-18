@@ -1,5 +1,11 @@
 package com.chatbot.talia.ws.adapter.codex.client;
 
+import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexWebSocketClient;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
+import com.chatbot.talia.ws.adapter.codex.protocol.CodexRpcSchema;
+import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageReporter;
+
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadListRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadResumeRequest;
@@ -24,7 +30,14 @@ import static org.mockito.Mockito.when;
 
 class CodexWebSocketDemoTests {
     private final CodexWebSocketClient rpc = mock(CodexWebSocketClient.class);
-    private final CodexClient client = new CodexClient(rpc);
+    private final CodexClient client;
+
+    {
+        when(rpc.settings()).thenReturn(CodexSettings.local(java.net.URI.create("ws://127.0.0.1:4222")));
+        org.mockito.Mockito.doNothing().when(rpc).onServerRequest(org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.doNothing().when(rpc).onNotification(org.mockito.ArgumentMatchers.any());
+        client = new CodexClient(rpc);
+    }
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
@@ -110,7 +123,7 @@ class CodexWebSocketDemoTests {
     }
 
     private void stubTurns(String threadId, String cursor, String json) {
-        ThreadTurnsListResponse turns = mapper.readValue(json, ThreadTurnsListResponse.class);
+        ThreadTurnsListResponse turns = new CodexMessageCodec(mapper).readThreadTurnsListResponse(json);
         when(rpc.send(ThreadTurnsListRequest.create(threadId, cursor), ThreadTurnsListResponse.class))
                 .thenReturn(CompletableFuture.completedFuture(turns));
     }

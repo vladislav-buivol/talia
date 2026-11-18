@@ -1,22 +1,26 @@
 package com.chatbot.talia.ws.adapter.codex.protocol.handler;
 
-import com.chatbot.talia.ws.adapter.codex.client.CodexMessageReporter;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcResponse;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.function.Consumer;
 
 @Component
 @Profile("codex")
 public final class CodexMessageHandlerRegistry {
     private final Map<JsonRpcResponse.Type, MessageHandler<JsonRpcResponse>> handlers;
+    private final CodexServerRequestHandler serverRequests;
+    private final CodexNotificationHandler notifications;
 
     public CodexMessageHandlerRegistry(
             CodexNotificationHandler notificationHandler,
             CodexServerRequestHandler serverRequestHandler,
             CodexResponseHandler responseHandler) {
+        this.serverRequests = serverRequestHandler;
+        this.notifications = notificationHandler;
         handlers = Map.of(
                 JsonRpcResponse.Type.NOTIFICATION,
                 message -> notificationHandler.handle((CodexMessageCodec.Notification) message),
@@ -32,6 +36,14 @@ public final class CodexMessageHandlerRegistry {
                 new CodexServerRequestHandler(reporter),
                 new CodexResponseHandler(reporter)
         );
+    }
+
+    public void onNotification(Consumer<CodexMessageCodec.Notification> callback) {
+        notifications.setListener(callback);
+    }
+
+    public void onServerRequest(Consumer<CodexMessageCodec.ServerRequest> callback) {
+        serverRequests.setReceiver(callback);
     }
 
     public MessageHandler<JsonRpcResponse> get(JsonRpcResponse.Type type) {

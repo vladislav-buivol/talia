@@ -1,6 +1,11 @@
 package com.chatbot.talia.ws.adapter.codex.client;
 
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexWebSocketClient;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
+import com.chatbot.talia.ws.adapter.codex.protocol.CodexRpcSchema;
+import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageReporter;
+
 import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest;

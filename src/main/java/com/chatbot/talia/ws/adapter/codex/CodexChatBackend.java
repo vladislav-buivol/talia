@@ -3,6 +3,7 @@ package com.chatbot.talia.ws.adapter.codex;
 import com.chatbot.talia.ws.adapter.codex.client.CodexClient;
 import com.chatbot.talia.ws.adapter.codex.client.CodexTurnResult;
 import com.chatbot.talia.ws.adapter.codex.client.ConversationHistory;
+import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest.ClientInfo;
 import com.chatbot.talia.ws.core.ChatBackend;
@@ -79,10 +80,17 @@ public final class CodexChatBackend implements ChatBackend {
         private CompletableFuture<Void> ready;
         private CodexClient resumedClient;
         private boolean closed;
+        private boolean interruptRequested;
+        private Consumer<ApprovalCoordinator.ApprovalPrompt> approvalListener = prompt -> {};
+        private Consumer<String> resolvedListener = id -> {};
 
         CodexConversation(String threadId, CodexClient startedClient) {
             this.threadId = threadId;
             client = startedClient;
+            if (client != null) {
+                client.onApproval(approvalListener);
+                client.onApprovalResolved(resolvedListener);
+            }
             resumedClient = startedClient;
             ready = CompletableFuture.completedFuture(null);
         }
@@ -106,15 +114,30 @@ public final class CodexChatBackend implements ChatBackend {
         @Override
         public TurnResult runTurn(String text, String model, Consumer<String> onText)
                 throws InterruptedException, ExecutionException {
-            CodexClient current = initializedClient();
-            if (resumedClient != current) {
-                current.resumeConversation(threadId).get();
-                resumedClient = current;
+            try {
+                CodexClient current = initializedClient();
+                if (resumedClient != current) {
+                    current.resumeConversation(threadId).get();
+                    resumedClient = current;
+                }
+
+                CompletableFuture<CodexTurnResult> active;
+                synchronized (this) {
+                    active = model == null
+                            ? current.runTurn(threadId, text, onText)
+                            : current.runTurn(threadId, text, CodexModel.fromId(model), onText);
+                    if (interruptRequested) {
+                        current.interruptTurn(threadId);
+                    }
+                }
+
+                CodexTurnResult result = active.get();
+                return new TurnResult(result.turnId(), result.status(), result.errorMessage());
+            } finally {
+                synchronized (this) {
+                    interruptRequested = false;
+                }
             }
-            CodexTurnResult result = model == null
-                    ? current.runTurn(threadId, text, onText).get()
-                    : current.runTurn(threadId, text, CodexModel.fromId(model), onText).get();
-            return new TurnResult(result.turnId(), result.status(), result.errorMessage());
         }
 
         private CodexClient initializedClient() throws InterruptedException, ExecutionException {
@@ -125,7 +148,12 @@ public final class CodexChatBackend implements ChatBackend {
                     throw new IllegalStateException("Conversation is closed");
                 }
                 if (client == null || client.isClosed() || ready.isCompletedExceptionally()) {
+                    if (client != null) {
+                        client.close();
+                    }
                     client = clients.get();
+                    client.onApproval(approvalListener);
+                    client.onApprovalResolved(resolvedListener);
                     ready = new CompletableFuture<>();
                     CodexClient connecting = client;
                     CompletableFuture<Void> completion = ready;
@@ -138,6 +166,27 @@ public final class CodexChatBackend implements ChatBackend {
             return current;
         }
 
+        @Override
+        public synchronized void onApproval(Consumer<ApprovalCoordinator.ApprovalPrompt> listener) {
+            approvalListener = listener;
+            if (client != null) {
+                client.onApproval(listener);
+            }
+        }
+
+        @Override
+        public synchronized void onApprovalResolved(Consumer<String> listener) {
+            resolvedListener = listener;
+            if (client != null) {
+                client.onApprovalResolved(listener);
+            }
+        }
+
+        @Override
+        public synchronized boolean resolveApproval(String requestId, ApprovalCoordinator.Decision decision) {
+            return client != null && client.resolveApproval(requestId, decision);
+        }
+
         private void initialize(CodexClient connecting, CompletableFuture<Void> completion) {
             try {
                 connect(connecting).get();
@@ -148,6 +197,18 @@ public final class CodexChatBackend implements ChatBackend {
                 if (error instanceof InterruptedException) {
                     Thread.currentThread().interrupt();
                 }
+            }
+        }
+
+        @Override
+        public void interrupt() throws InterruptedException, ExecutionException {
+            CodexClient current;
+            synchronized (this) {
+                interruptRequested = true;
+                current = client;
+            }
+            if (current != null && !current.isClosed()) {
+                current.interruptTurn(threadId).get();
             }
         }
 

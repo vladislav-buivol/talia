@@ -1,6 +1,7 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.transport;
 
 import java.net.http.WebSocket;
+import java.time.Duration;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -15,14 +16,16 @@ public class SendTask implements Runnable {
     private final WebSocket socket;
     private final BooleanSupplier requestFinished;
     private final Consumer<Throwable> onSendTimeout;
+    private final Duration sendTimeout;
 
     SendTask(String message, CompletableFuture<Void> result, WebSocket socket,
-             BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout) {
+             BooleanSupplier requestFinished, Consumer<Throwable> onSendTimeout, Duration timeout) {
         this.message = message;
         this.result = result;
         this.socket = socket;
         this.requestFinished = requestFinished;
         this.onSendTimeout = onSendTimeout;
+        this.sendTimeout = timeout;
     }
 
     @Override
@@ -35,7 +38,7 @@ public class SendTask implements Runnable {
             return;
         }
         try {
-            socket.sendText(message, true).get(10, TimeUnit.SECONDS);
+            socket.sendText(message, true).get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
             result.complete(null);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
@@ -49,5 +52,4 @@ public class SendTask implements Runnable {
             result.completeExceptionally(error);
         }
     }
-
 }

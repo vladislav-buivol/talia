@@ -1,6 +1,6 @@
 export type Action =
   | "startNewDialog" | "continueDialog" | "getDialogs" | "getHistory" | "getModels"
-  | "sendMessage" | "changeModel" | "closeChat" | "finishChat"
+  | "sendMessage" | "cancelTurn" | "resolveApproval" | "changeModel" | "closeChat" | "finishChat"
   | "connectAsReader" | "connectAsWriter" | "transferWriter"
   | "deleteChat" | "closeChatAndDelete" | "finishChatAndDelete";
 
@@ -15,6 +15,16 @@ export interface ChatMessage {
   role: "USER" | "ASSISTANT";
   text: string;
   turnId?: string;
+}
+
+export interface ApprovalPrompt {
+  requestId: string;
+  threadId: string;
+  turnId?: string | null;
+  method: string;
+  reason?: string | null;
+  command?: string | null;
+  cwd?: string | null;
 }
 
 export interface ChatEvent {
@@ -37,6 +47,8 @@ export interface ChatEvent {
     dialogs?: Dialog[];
     nextCursor?: string;
     messages?: ChatMessage[];
+    approval?: ApprovalPrompt;
+    requestId?: string;
   };
 }
 
@@ -48,6 +60,8 @@ export type ChatRequest =
   | { type: "POST"; action: "continueDialog"; threadId: string }
   | { type: "POST"; action: "connectAsReader" | "connectAsWriter"; threadId?: string }
   | { type: "POST"; action: "sendMessage"; text: string }
+  | { type: "POST"; action: "cancelTurn" }
+  | { type: "POST"; action: "resolveApproval"; requestId: string; decision: "ACCEPT" | "DECLINE" }
   | { type: "POST"; action: "changeModel"; model: string }
   | { type: "POST"; action: "transferWriter"; clientId: string }
   | { type: "POST"; action: "closeChat" | "finishChat" }

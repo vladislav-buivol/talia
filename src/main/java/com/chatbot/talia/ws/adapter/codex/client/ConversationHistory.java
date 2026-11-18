@@ -1,6 +1,6 @@
 package com.chatbot.talia.ws.adapter.codex.client;
 
-import tools.jackson.databind.JsonNode;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadTurnsListResponse;
 
 import java.util.List;
 
@@ -19,7 +19,7 @@ public record ConversationHistory(String threadId, List<Message> messages) {
         ASSISTANT
     }
 
-    /** User messages also retain their structured Codex input, including attachments. */
-    public record Message(Role role, String text, JsonNode userInput) {
+    /** Retains structured user input without exposing Jackson to consumers. */
+    public record Message(Role role, String text, List<ThreadTurnsListResponse.UserInput> userInput) {
     }
 }

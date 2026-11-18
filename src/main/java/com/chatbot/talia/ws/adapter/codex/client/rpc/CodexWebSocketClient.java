@@ -1,32 +1,39 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.rpc;
 
+import com.chatbot.talia.ws.adapter.codex.client.CodexTurnResult;
+import com.chatbot.talia.ws.adapter.codex.client.transport.CodexWebSocketConnection;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageHandlerRegistry;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexMethod;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexNotification;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexRequest;
-import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializedNotification;
+import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.ThreadUnsubscribeRequest;
+import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnInterruptRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.TurnStartRequest;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.InitializeResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcSuccessResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadUnsubscribeResponse;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.TurnInterruptResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.net.http.WebSocket;
-import java.util.Objects;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.Objects;
 
 @Component
 @Profile("codex")
@@ -37,14 +44,48 @@ public class CodexWebSocketClient implements AutoCloseable {
     private final AtomicLong nextRequestId = new AtomicLong();
     private final AtomicBoolean handshakeStarted = new AtomicBoolean();
     private volatile boolean initialized;
+    private final CodexSettings settings;
+    private final CodexMessageHandlerRegistry handlerRegistry;
 
+    @Autowired
     public CodexWebSocketClient(
             @Value("${talia.codex.url}") String serverUrl,
             CodexMessageCodec messageCodec,
             CodexMessageHandlerRegistry handlerRegistry) {
+        this(CodexSettings.local(URI.create(serverUrl)), messageCodec, handlerRegistry);
+    }
+
+    public CodexWebSocketClient(CodexSettings settings, CodexMessageCodec messageCodec,
+            CodexMessageHandlerRegistry handlerRegistry) {
+        this.settings = settings;
+        this.handlerRegistry = handlerRegistry;
         this.messageCodec = messageCodec;
-        this.dispatcher = new CodexMessageDispatcher(messageCodec, handlerRegistry);
-        this.connection = new CodexWebSocketConnection(URI.create(serverUrl), dispatcher);
+        this.dispatcher = new CodexMessageDispatcher(messageCodec, handlerRegistry, settings.rpcTimeout());
+        this.connection = new CodexWebSocketConnection(settings.url(), dispatcher, settings);
+    }
+
+    public CodexSettings settings() {
+        return settings;
+    }
+
+    public void onNotification(Consumer<CodexMessageCodec.Notification> callback) {
+        handlerRegistry.onNotification(callback);
+    }
+
+    public void onServerRequest(Consumer<CodexMessageCodec.ServerRequest> callback) {
+        handlerRegistry.onServerRequest(callback);
+    }
+
+    public CompletableFuture<Void> sendServerResult(CodexMessageCodec.RequestId id, Object result) {
+        Throwable error = checkReady();
+        return error != null ? CompletableFuture.failedFuture(error)
+                : connection.send(messageCodec.encodeServerResult(id, result));
+    }
+
+    public CompletableFuture<Void> sendServerError(CodexMessageCodec.RequestId id, long code, String message) {
+        Throwable error = checkReady();
+        return error != null ? CompletableFuture.failedFuture(error)
+                : connection.send(messageCodec.encodeServerError(id, code, message));
     }
 
     public CompletableFuture<InitializeResponse> connectAndInitialize(String name, String title, String version) {
@@ -143,7 +184,12 @@ public class CodexWebSocketClient implements AutoCloseable {
         }
 
         String threadId = request.params().threadId();
-        CodexTurn turn = new CodexTurn(onText);
+        CodexTurn turn = new CodexTurn(
+                onText,
+                settings.maxEarlyNotifications(),
+                settings.turnStartTimeout(),
+                id -> send(TurnInterruptRequest.create(threadId, id), TurnInterruptResponse.class)
+                        .thenApply(ignored -> null));
         if (!dispatcher.registerTurn(threadId, turn)) {
             return CompletableFuture.failedFuture(new IllegalStateException("Already tracking a turn on thread " + threadId));
         }
@@ -151,8 +197,13 @@ public class CodexWebSocketClient implements AutoCloseable {
         return turn.result();
     }
 
+    public CompletableFuture<Void> interruptTurn(String threadId) {
+        CodexTurn turn = dispatcher.trackedTurn(threadId);
+        return turn == null ? CompletableFuture.completedFuture(null) : turn.interrupt();
+    }
+
     /** Unsubscribes this connection while preserving the conversation and its history. */
-    CompletableFuture<ThreadUnsubscribeResponse> unsubscribeThread(String threadId) {
+    public CompletableFuture<ThreadUnsubscribeResponse> unsubscribeThread(String threadId) {
         Objects.requireNonNull(threadId);
         CodexTurn turn = dispatcher.trackedTurn(threadId);
         CompletableFuture<ThreadUnsubscribeResponse> response = send(
@@ -172,9 +223,20 @@ public class CodexWebSocketClient implements AutoCloseable {
 
     private <R extends JsonRpcSuccessResponse<?>> CompletableFuture<R> sendRequest(
             CodexRequest<?> request, Class<R> responseType) {
-        PendingRequest<R> pending = new PendingRequest<>(Objects.requireNonNull(responseType), new CompletableFuture<>());
+        PendingRequest<R> pending = new PendingRequest<>(Objects.requireNonNull(responseType),
+                new CompletableFuture<>(), request.method(), timeoutFor(request.method()));
         sendRequest(request, pending);
         return pending.future();
+    }
+
+    private Duration timeoutFor(String method) {
+        if (CodexMethod.TURN_START.value().equals(method)) {
+            return settings.turnStartTimeout();
+        }
+        if (CodexMethod.TURN_INTERRUPT.value().equals(method)) {
+            return settings.interruptTimeout();
+        }
+        return settings.rpcTimeout();
     }
 
     private void sendRequest(CodexRequest<?> request, PendingRequest<?> pending) {
@@ -205,7 +267,7 @@ public class CodexWebSocketClient implements AutoCloseable {
         return connection.closeAsync();
     }
 
-    boolean isClosed() {
+    public boolean isClosed() {
         return dispatcher.closeCause() != null;
     }
 }

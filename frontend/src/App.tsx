@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { Action, ChatEvent, ChatMessage, ChatRequest, Dialog } from "./protocol";
+import type { Action, ApprovalPrompt, ChatEvent, ChatMessage, ChatRequest, Dialog } from "./protocol";
 
 const labels: Record<Action, string> = {
   startNewDialog: "New chat", continueDialog: "Select chat", getDialogs: "Load chats",
   getHistory: "Load history", getModels: "Load models", sendMessage: "Send message", changeModel: "Change model",
-  closeChat: "Leave chat", finishChat: "Finish chat", connectAsReader: "Join as reader",
+  closeChat: "Leave chat", finishChat: "Finish chat", cancelTurn: "Stop", resolveApproval: "Resolve approval", connectAsReader: "Join as reader",
   connectAsWriter: "Join as writer", transferWriter: "Transfer writer",
   deleteChat: "Delete chat", closeChatAndDelete: "Leave & delete",
   finishChatAndDelete: "Finish & delete",
@@ -38,6 +38,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState<string | null>(null);
+  const [approvals, setApprovals] = useState<ApprovalPrompt[]>([]);
 
   useEffect(() => () => socket.current?.close(), []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
@@ -64,7 +65,7 @@ export default function App() {
     const pendingReplies: Record<string, string[]> = {
       startNewDialog: ["session.joined"], continueDialog: ["dialog.selected"],
       getDialogs: ["dialogs"], getHistory: ["history"], sendMessage: ["user.text"],
-      getModels: ["models"],
+      getModels: ["models"], cancelTurn: ["assistant.text.done"], resolveApproval: ["approval.resolved"],
       changeModel: ["model.changed"], closeChat: ["chat.closed"], finishChat: ["chat.finished"],
       connectAsReader: ["session.joined"], connectAsWriter: ["session.joined", "writer.changed"],
       transferWriter: ["writer.changed"], deleteChat: ["chat.deleted"],
@@ -90,6 +91,7 @@ export default function App() {
         setSelected(data.threadId ?? null);
         break;
       case "session.joined":
+        setApprovals([]);
         threadRef.current = data.threadId ?? null;
         messageRevision.current = 0;
         setThread(data.threadId ?? null);
@@ -127,7 +129,15 @@ export default function App() {
           return [...previous, { role: "ASSISTANT", text: data.text ?? "", turnId: data.turnId ?? undefined }];
         });
         break;
+      case "approval.required":
+        if (data.approval && data.approval.threadId === threadRef.current)
+          setApprovals(previous => [...previous.filter(p => p.requestId !== data.approval!.requestId), data.approval!]);
+        break;
+      case "approval.resolved":
+        setApprovals(previous => previous.filter(p => p.requestId !== data.requestId));
+        break;
       case "assistant.text.done":
+        setApprovals([]);
         if (data.status && data.status !== "completed") setNotice(data.errorMessage || `Turn ${data.status}`);
         break;
       case "writer.changed":
@@ -143,6 +153,7 @@ export default function App() {
       case "chat.closed":
       case "chat.finished":
       case "chat.deleted":
+        setApprovals([]);
         if (data.threadId === threadRef.current) {
           threadRef.current = null;
           setThread(null);
@@ -199,6 +210,7 @@ export default function App() {
       setDialogs([]);
       setCursor(undefined);
       setMessages([]);
+      setApprovals([]);
       setModels([]);
       setModel("");
       setNotice("");
@@ -224,7 +236,9 @@ export default function App() {
         else setError("Choose or enter a connected client ID first.");
         break;
       case "closeChat":
-      case "finishChat": send({ type: "POST", action }); break;
+      case "finishChat":
+      case "cancelTurn": send({ type: "POST", action }); break;
+      case "resolveApproval": break;
       case "deleteChat": send({ type: "DELETE", action, ...(threadId ? { threadId } : {}) }); break;
       case "closeChatAndDelete":
       case "finishChatAndDelete": send({ type: "DELETE", action }); break;
@@ -291,6 +305,22 @@ export default function App() {
             {messages.length === 0 ? <div className="empty-state"><div className="empty-icon">✳</div><span className="eyebrow">{thread ? "START THE CONVERSATION" : "WELCOME TO TALIA"}</span><h3>{thread ? "A fresh page." : "Good to see you here."}</h3><p>{thread ? "Your messages and replies will appear here." : "Your conversations live here. Connect to Talia to get started."}</p></div> :
               <div className="messages">{messages.map((message, index) => <article className={`message ${message.role === "USER" ? "user" : "assistant"}`} key={index}><div className="avatar">{message.role === "USER" ? "Y" : "✳"}</div><div className="message-content"><div className="message-label">{message.role === "USER" ? "YOU" : "TALIA"}</div><div className="bubble">{message.text}</div></div></article>)}<div ref={bottom} /></div>}
           </div>
+          {approvals.length > 0 && thread && <section aria-label="Pending Codex approvals" className="join-panel" style={{display:"grid",gap:12}}>
+            {approvals.map(approval => <div key={approval.requestId} style={{display:"grid",gap:8}}>
+              <strong>Codex requires your approval</strong>
+              <div>{approval.method}</div>
+              {approval.command && <code style={{whiteSpace:"pre-wrap"}}>{approval.command}</code>}
+              {approval.cwd && <small>Directory: {approval.cwd}</small>}
+              {approval.reason && <p>{approval.reason}</p>}
+              <div className="join-actions">
+                <button className="button dark" disabled={!available("resolveApproval") || !!pending}
+                  onClick={() => send({type:"POST",action:"resolveApproval",requestId:approval.requestId,decision:"ACCEPT"})}>Allow once</button>
+                <button className="button danger" disabled={!available("resolveApproval") || !!pending}
+                  onClick={() => send({type:"POST",action:"resolveApproval",requestId:approval.requestId,decision:"DECLINE"})}>Deny</button>
+              </div>
+            </div>)}
+          </section>}
+          {thread && available("cancelTurn") && <button className="button danger" onClick={() => perform("cancelTurn")}>Stop generation</button>}
           {thread && <div className="toolbar">
             {available("getHistory") && <button className="tool-button" disabled={!!pending} onClick={() => perform("getHistory")}>↻ History</button>}
             {available("connectAsWriter") && <button className="tool-button" disabled={!!pending} onClick={() => perform("connectAsWriter")}>Become writer</button>}

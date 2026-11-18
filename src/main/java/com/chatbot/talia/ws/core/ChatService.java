@@ -2,8 +2,24 @@ package com.chatbot.talia.ws.core;
 
 import com.chatbot.talia.ws.core.protocol.ChatAction;
 import com.chatbot.talia.ws.core.protocol.ChatRequest;
-import com.chatbot.talia.ws.core.protocol.request.*;
 import com.chatbot.talia.ws.core.protocol.ChatResponse;
+import com.chatbot.talia.ws.core.protocol.request.CancelTurnRequest;
+import com.chatbot.talia.ws.core.protocol.request.ChangeModelRequest;
+import com.chatbot.talia.ws.core.protocol.request.CloseChatAndDeleteRequest;
+import com.chatbot.talia.ws.core.protocol.request.CloseChatRequest;
+import com.chatbot.talia.ws.core.protocol.request.ConnectAsReaderRequest;
+import com.chatbot.talia.ws.core.protocol.request.ConnectAsWriterRequest;
+import com.chatbot.talia.ws.core.protocol.request.ContinueDialogRequest;
+import com.chatbot.talia.ws.core.protocol.request.DeleteChatRequest;
+import com.chatbot.talia.ws.core.protocol.request.FinishChatAndDeleteRequest;
+import com.chatbot.talia.ws.core.protocol.request.FinishChatRequest;
+import com.chatbot.talia.ws.core.protocol.request.GetDialogsRequest;
+import com.chatbot.talia.ws.core.protocol.request.GetHistoryRequest;
+import com.chatbot.talia.ws.core.protocol.request.GetModelsRequest;
+import com.chatbot.talia.ws.core.protocol.request.ResolveApprovalRequest;
+import com.chatbot.talia.ws.core.protocol.request.SendMessageRequest;
+import com.chatbot.talia.ws.core.protocol.request.StartNewDialogRequest;
+import com.chatbot.talia.ws.core.protocol.request.TransferWriterRequest;
 import com.chatbot.talia.ws.core.protocol.response.ChatDialog;
 import com.chatbot.talia.ws.core.protocol.response.ChatDialogPage;
 import org.slf4j.Logger;
@@ -26,10 +42,33 @@ public final class ChatService implements AutoCloseable {
     private final ChatBackend backend;
     private final ConcurrentHashMap<String, ChatSession> chats = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ChatPeer> peers = new ConcurrentHashMap<>();
+    private final Map<Class<? extends ChatRequest>, RegisteredHandler<?>> handlers;
 
     public ChatService(ObjectMapper mapper, ChatBackend backend) {
         this.mapper = mapper;
         this.backend = backend;
+        this.handlers = Map.ofEntries(
+                register(StartNewDialogRequest.class, START_NEW_DIALOG, HandlerScope.MENU, this::handleStartNewDialog),
+                register(GetDialogsRequest.class, GET_DIALOGS, HandlerScope.MENU, this::handleGetDialogs),
+                register(ContinueDialogRequest.class, CONTINUE_DIALOG, HandlerScope.MENU, this::handleContinueDialog),
+                register(GetModelsRequest.class, GET_MODELS, HandlerScope.BOTH, this::handleGetModels),
+                register(GetHistoryRequest.class, GET_HISTORY, HandlerScope.CHAT, this::handleGetHistory),
+                register(SendMessageRequest.class, SEND_MESSAGE, HandlerScope.CHAT, this::handleSendMessage),
+                register(CancelTurnRequest.class, CANCEL_TURN, HandlerScope.CHAT, this::handleCancelTurn),
+                register(ResolveApprovalRequest.class, RESOLVE_APPROVAL, HandlerScope.CHAT, this::handleResolveApproval),
+                register(ChangeModelRequest.class, CHANGE_MODEL, HandlerScope.CHAT, this::handleChangeModel),
+                register(CloseChatRequest.class, CLOSE_CHAT, HandlerScope.CHAT, this::handleCloseChat),
+                register(FinishChatRequest.class, FINISH_CHAT, HandlerScope.CHAT, this::handleFinishChat),
+                register(CloseChatAndDeleteRequest.class, CLOSE_CHAT_AND_DELETE, HandlerScope.CHAT,
+                        this::handleCloseChatAndDelete),
+                register(FinishChatAndDeleteRequest.class, FINISH_CHAT_AND_DELETE, HandlerScope.CHAT,
+                        this::handleFinishChatAndDelete),
+                register(DeleteChatRequest.class, DELETE_CHAT, HandlerScope.BOTH, this::handleDeleteChat),
+                register(ConnectAsReaderRequest.class, CONNECT_AS_READER, HandlerScope.MENU,
+                        this::handleConnectAsReader),
+                register(ConnectAsWriterRequest.class, CONNECT_AS_WRITER, HandlerScope.BOTH,
+                        this::handleConnectAsWriter),
+                register(TransferWriterRequest.class, TRANSFER_WRITER, HandlerScope.CHAT, this::handleTransferWriter));
     }
 
     public void connect(String clientId, Consumer<ChatResponse> responses) {
@@ -43,69 +82,158 @@ public final class ChatService implements AutoCloseable {
         if (peer == null) {
             return;
         }
-        ChatSession chat = peer.chat();
-        if (request instanceof GetModelsRequest) {
-            if (chat == null) {
-                peer.send("models", menu(peer), Map.of("models", backend.models()));
-            } else {
-                chat.models(peer, backend.models());
-            }
+
+        if (request == null) {
+            error(peer, "invalid_request", "Chat request is required");
             return;
         }
-        if (chat == null) {
-            handleMenu(peer, request);
-        } else {
-            switch (request) {
-                case GetHistoryRequest history -> chat.history(peer, history.limit() == null ? 50 : history.limit());
-                case SendMessageRequest message -> chat.write(peer, message.text() == null ? "" : message.text());
-                case ChangeModelRequest change -> {
-                    if (change.model() == null || !backend.supportsModel(change.model())) {
-                        chat.error(peer, "invalid_model", "A supported model is required");
-                    } else {
-                        chat.changeModel(peer, change.model());
-                    }
-                }
-                case CloseChatRequest ignored -> {
-                    if (peer.detach(chat)) {
-                        chat.leave(peer);
-                        peer.send("chat.closed", MENU, Map.of("threadId", chat.threadId()));
-                    }
-                }
-                case FinishChatRequest ignored -> finish(peer, chat);
-                case CloseChatAndDeleteRequest ignored -> delete(peer, chat.threadId());
-                case FinishChatAndDeleteRequest ignored -> delete(peer, chat.threadId());
-                case DeleteChatRequest deletion -> {
-                    if (deletion.threadId() == null || chat.threadId().equals(deletion.threadId())) {
-                        delete(peer, chat.threadId());
-                    } else {
-                        chat.error(peer, "invalid_thread", "Close the current chat to delete another dialog");
-                    }
-                }
-                case ConnectAsWriterRequest ignored -> chat.claimWriter(peer);
-                case TransferWriterRequest transfer -> chat.transfer(peer, transfer.clientId());
-                default -> chat.error(peer, "action_unavailable", "Close the current chat to return to the menu");
-            }
+
+        ChatSession chat = peer.chat();
+        RegisteredHandler<?> handler = handlers.get(request.getClass());
+        if (handler == null || !handler.scope().supports(chat)) {
+            error(peer, "action_unavailable", chat == null
+                    ? "Select a chat first"
+                    : "Close the current chat to return to the menu");
+            return;
+        }
+
+        log.info("Chat handler invoked: action={}, handler={}, context={}",
+                handler.action().value(),
+                handler.requestType().getSimpleName(),
+                chat == null ? "menu" : "chat");
+
+        try {
+            handler.execute(peer, chat, request);
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            log.warn("Chat handler interrupted: action={}", handler.action().value(), failure);
+            error(peer, "codex_unavailable", "Chat request interrupted");
+        } catch (ExecutionException | RuntimeException failure) {
+            log.warn("Chat handler failed: action={}", handler.action().value(), failure);
+            error(peer, "codex_unavailable", "Could not complete the chat request");
         }
     }
 
-    private void handleMenu(ChatPeer peer, ChatRequest request) {
-        try {
-            switch (request) {
-                case StartNewDialogRequest start -> start(peer, start.model());
-                case GetDialogsRequest dialogs -> list(peer, dialogs);
-                case ContinueDialogRequest dialog -> select(peer, dialog.threadId());
-                case DeleteChatRequest deletion -> delete(peer,
-                        deletion.threadId() == null ? peer.selectedThreadId() : deletion.threadId());
-                case ConnectAsReaderRequest reader -> joinSelectedDialog(peer, reader.threadId(), false);
-                case ConnectAsWriterRequest writer -> joinSelectedDialog(peer, writer.threadId(), true);
-                default -> error(peer, "action_unavailable", "Select a chat first");
-            }
-        } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
-            error(peer, "codex_unavailable", "Chat request interrupted");
-        } catch (ExecutionException | RuntimeException failure) {
-            log.debug("Chat request {} failed", request.getClass().getSimpleName(), failure);
-            error(peer, "codex_unavailable", "Could not complete the chat request");
+    private void handleStartNewDialog(ChatPeer peer, ChatSession chat, StartNewDialogRequest request)
+            throws InterruptedException, ExecutionException {
+        start(peer, request.model());
+    }
+
+    private void handleGetDialogs(ChatPeer peer, ChatSession chat, GetDialogsRequest request)
+            throws InterruptedException, ExecutionException {
+        list(peer, request);
+    }
+
+    private void handleContinueDialog(ChatPeer peer, ChatSession chat, ContinueDialogRequest request) {
+        select(peer, request.threadId());
+    }
+
+    private void handleGetModels(ChatPeer peer, ChatSession chat, GetModelsRequest request) {
+        if (chat == null) {
+            peer.send("models", menu(peer), Map.of("models", backend.models()));
+        } else {
+            chat.models(peer, backend.models());
+        }
+    }
+
+    private void handleGetHistory(ChatPeer peer, ChatSession chat, GetHistoryRequest request) {
+        chat.history(peer, request.limit() == null ? 50 : request.limit());
+    }
+
+    private void handleSendMessage(ChatPeer peer, ChatSession chat, SendMessageRequest request) {
+        chat.write(peer, request.text() == null ? "" : request.text());
+    }
+
+    private void handleCancelTurn(ChatPeer peer, ChatSession chat, CancelTurnRequest request) {
+        chat.cancel(peer);
+    }
+
+    private void handleResolveApproval(ChatPeer peer, ChatSession chat, ResolveApprovalRequest request) {
+        chat.resolveApproval(peer, request.requestId(), request.decision());
+    }
+
+    private void handleChangeModel(ChatPeer peer, ChatSession chat, ChangeModelRequest request) {
+        if (request.model() == null || !backend.supportsModel(request.model())) {
+            chat.error(peer, "invalid_model", "A supported model is required");
+            return;
+        }
+        chat.changeModel(peer, request.model());
+    }
+
+    private void handleCloseChat(ChatPeer peer, ChatSession chat, CloseChatRequest request) {
+        if (peer.detach(chat)) {
+            chat.leave(peer);
+            peer.send("chat.closed", MENU, Map.of("threadId", chat.threadId()));
+        }
+    }
+
+    private void handleFinishChat(ChatPeer peer, ChatSession chat, FinishChatRequest request) {
+        finish(peer, chat);
+    }
+
+    private void handleCloseChatAndDelete(ChatPeer peer, ChatSession chat, CloseChatAndDeleteRequest request) {
+        delete(peer, chat.threadId());
+    }
+
+    private void handleFinishChatAndDelete(ChatPeer peer, ChatSession chat, FinishChatAndDeleteRequest request) {
+        delete(peer, chat.threadId());
+    }
+
+    private void handleDeleteChat(ChatPeer peer, ChatSession chat, DeleteChatRequest request) {
+        if (chat == null) {
+            delete(peer, request.threadId() == null ? peer.selectedThreadId() : request.threadId());
+        } else if (request.threadId() == null || chat.threadId().equals(request.threadId())) {
+            delete(peer, chat.threadId());
+        } else {
+            chat.error(peer, "invalid_thread", "Close the current chat to delete another dialog");
+        }
+    }
+
+    private void handleConnectAsReader(ChatPeer peer, ChatSession chat, ConnectAsReaderRequest request) {
+        joinSelectedDialog(peer, request.threadId(), false);
+    }
+
+    private void handleConnectAsWriter(ChatPeer peer, ChatSession chat, ConnectAsWriterRequest request) {
+        if (chat == null) {
+            joinSelectedDialog(peer, request.threadId(), true);
+        } else {
+            chat.claimWriter(peer);
+        }
+    }
+
+    private void handleTransferWriter(ChatPeer peer, ChatSession chat, TransferWriterRequest request) {
+        chat.transfer(peer, request.clientId());
+    }
+
+    private static <T extends ChatRequest> Map.Entry<Class<? extends ChatRequest>, RegisteredHandler<?>>
+    register(Class<T> requestType, ChatAction action, HandlerScope scope, ChatRequestHandler<T> handler) {
+        return Map.entry(requestType, new RegisteredHandler<>(requestType, action, scope, handler));
+    }
+
+    private enum HandlerScope {
+        MENU,
+        CHAT,
+        BOTH;
+
+        boolean supports(ChatSession chat) {
+            return this == BOTH || this == (chat == null ? MENU : CHAT);
+        }
+    }
+
+    @FunctionalInterface
+    private interface ChatRequestHandler<T extends ChatRequest> {
+        void handle(ChatPeer peer, ChatSession chat, T request) throws InterruptedException, ExecutionException;
+    }
+
+    private record RegisteredHandler<T extends ChatRequest>(
+            Class<T> requestType,
+            ChatAction action,
+            HandlerScope scope,
+            ChatRequestHandler<T> handler) {
+
+        void execute(ChatPeer peer, ChatSession chat, ChatRequest request)
+                throws InterruptedException, ExecutionException {
+            handler.handle(peer, chat, requestType.cast(request));
         }
     }
 

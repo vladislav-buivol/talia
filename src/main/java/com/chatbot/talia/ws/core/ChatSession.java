@@ -1,5 +1,6 @@
 package com.chatbot.talia.ws.core;
 
+import com.chatbot.talia.ws.adapter.codex.client.approval.ApprovalCoordinator;
 import com.chatbot.talia.ws.core.protocol.ChatAction;
 import com.chatbot.talia.ws.core.protocol.response.ChatMessage;
 import org.slf4j.Logger;
@@ -32,6 +33,8 @@ final class ChatSession {
         this.conversation = conversation;
         this.model = model;
         this.onIdle = onIdle;
+        conversation.onApproval(this::approvalRequired);
+        conversation.onApprovalResolved(this::approvalResolved);
     }
 
     String threadId() {
@@ -170,6 +173,58 @@ final class ChatSession {
         send(peer, response);
     }
 
+    private synchronized void approvalRequired(ApprovalCoordinator.ApprovalPrompt prompt) {
+        if (!threadId.equals(prompt.threadId())) {
+            return;
+        }
+        ObjectNode event = event("approval.required");
+        event.set("approval", mapper.valueToTree(prompt));
+        broadcast(event);
+    }
+
+    private synchronized void approvalResolved(String requestId) {
+        broadcast(event("approval.resolved").put("requestId", requestId));
+    }
+
+    synchronized void resolveApproval(ChatPeer peer, String requestId,
+            ApprovalCoordinator.Decision decision) {
+        if (!peer.id().equals(writerId)) {
+            error(peer, "read_only", "Only the writer can resolve approvals");
+            return;
+        }
+        if (decision == null || !conversation.resolveApproval(requestId, decision)) {
+            error(peer, "approval_unavailable", "Approval was already resolved or is unavailable");
+            return;
+        }
+    }
+
+    synchronized void cancel(ChatPeer peer) {
+        if (!peer.id().equals(writerId)) {
+            error(peer, "read_only", "Only the writer can stop a turn");
+            return;
+        }
+        if (activeTurn == null) {
+            return;
+        }
+        String expected = activeTurn;
+        Thread.startVirtualThread(() -> {
+            try {
+                conversation.interrupt();
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                reportInterruptFailure(expected);
+            } catch (ExecutionException | RuntimeException failure) {
+                reportInterruptFailure(expected);
+            }
+        });
+    }
+
+    private synchronized void reportInterruptFailure(String expected) {
+        if (expected.equals(activeTurn))
+            broadcast(event("error").put("turnId", expected).put("code", "interrupt_failed")
+                    .put("message", "Could not interrupt Codex turn"));
+    }
+
     synchronized void write(ChatPeer peer, String text) {
         if (!canWrite(peer)) {
             return;
@@ -189,7 +244,7 @@ final class ChatSession {
         try {
             Consumer<String> stream = delta -> broadcast(event("assistant.text.delta").put("turnId", turnId).put("text", delta));
             ChatBackend.TurnResult result = conversation.runTurn(text, selectedModel, stream);
-            completeTurn(event("assistant.text.done").put("turnId", turnId)
+            completeTurn(turnId, event("assistant.text.done").put("turnId", turnId)
                     .put("codexTurnId", result.turnId()).put("status", result.status())
                     .put("errorMessage", result.errorMessage()));
         } catch (InterruptedException error) {
@@ -202,12 +257,15 @@ final class ChatSession {
 
     private void failTurn(String turnId, Exception error) {
         log.debug("Chat turn failed for {}", threadId, error);
-        completeTurn(event("error").put("turnId", turnId).put("code", "turn_failed")
+        completeTurn(turnId, event("error").put("turnId", turnId).put("code", "turn_failed")
                 .put("message", "Could not complete the chat turn"));
     }
 
-    private void completeTurn(ObjectNode response) {
+    private void completeTurn(String expectedTurnId, ObjectNode response) {
         synchronized (this) {
+            if (!expectedTurnId.equals(activeTurn)) {
+                return;
+            }
             activeTurn = null;
             broadcast(response);
         }
@@ -254,6 +312,10 @@ final class ChatSession {
         if (writerId == null) {
             actions.add(ChatAction.CONNECT_AS_WRITER);
         } else if (peer.id().equals(writerId)) {
+            if (activeTurn != null) {
+                actions.add(ChatAction.CANCEL_TURN);
+            }
+            actions.add(ChatAction.RESOLVE_APPROVAL);
             if (activeTurn == null) {
                 actions.addAll(List.of(ChatAction.SEND_MESSAGE, ChatAction.CHANGE_MODEL, ChatAction.FINISH_CHAT,
                         ChatAction.DELETE_CHAT, ChatAction.CLOSE_CHAT_AND_DELETE, ChatAction.FINISH_CHAT_AND_DELETE));

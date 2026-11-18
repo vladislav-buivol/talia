@@ -1,16 +1,18 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.rpc;
 
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import com.chatbot.talia.ws.adapter.codex.protocol.CodexMessageCodec;
 import com.chatbot.talia.ws.adapter.codex.protocol.handler.CodexMessageHandlerRegistry;
+import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcErrorResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcResponse;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.JsonRpcSuccessResponse;
-import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod;
 
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 public final class CodexMessageDispatcher {
     private final CodexMessageCodec messageCodec;
@@ -18,15 +20,25 @@ public final class CodexMessageDispatcher {
     private final ConcurrentHashMap<Long, PendingRequest<?>> pendingRequests = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CodexTurn> turns = new ConcurrentHashMap<>();
     private final AtomicReference<Throwable> closeCause = new AtomicReference<>();
+    private final Duration defaultTimeout;
 
     CodexMessageDispatcher(CodexMessageCodec messageCodec, CodexMessageHandlerRegistry handlerRegistry) {
+        this(messageCodec, handlerRegistry, CodexSettings.DEFAULT_RPC_TIMEOUT);
+    }
+
+    CodexMessageDispatcher(CodexMessageCodec messageCodec, CodexMessageHandlerRegistry handlerRegistry, Duration timeout) {
         this.messageCodec = messageCodec;
         this.handlerRegistry = handlerRegistry;
+        this.defaultTimeout = timeout;
     }
 
     void register(long id, PendingRequest<?> pending) {
-        pendingRequests.put(id, pending);
-        pending.future().orTimeout(10, TimeUnit.SECONDS);
+        if (pendingRequests.putIfAbsent(id, pending) != null) {
+            pending.future().completeExceptionally(new IllegalStateException("Duplicate JSON-RPC request ID: " + id));
+            return;
+        }
+        Duration timeout = pending.timeout() == null ? defaultTimeout : pending.timeout();
+        pending.future().orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
         pending.future().whenComplete((result, error) -> pendingRequests.remove(id, pending));
         Throwable cause = closeCause();
         if (cause != null) {
@@ -88,21 +100,21 @@ public final class CodexMessageDispatcher {
         if (method != NotificationMethod.ITEM_AGENT_MESSAGE_DELTA && method != NotificationMethod.TURN_COMPLETED) {
             return;
         }
-        if (notification.params() == null || !notification.params().path("threadId").isString()) {
+        if (notification.params() == null || notification.params().threadId() == null) {
             return;
         }
 
-        CodexTurn turn = turns.get(notification.params().path("threadId").asString());
+        CodexTurn turn = turns.get(notification.params().threadId());
         if (turn != null) {
             turn.onNotification(notification);
         }
     }
 
-    boolean beginClose(Throwable cause) {
+    public boolean beginClose(Throwable cause) {
         return closeCause.compareAndSet(null, cause);
     }
 
-    void failPendingRequests(Throwable cause) {
+    public void failPendingRequests(Throwable cause) {
         for (PendingRequest<?> pending : pendingRequests.values()) {
             pending.future().completeExceptionally(cause);
         }
@@ -111,13 +123,13 @@ public final class CodexMessageDispatcher {
         }
     }
 
-    Throwable closeCause() {
+    public Throwable closeCause() {
         return closeCause.get();
     }
 
     private void completePendingRequest(JsonRpcResponse response, PendingRequest<?> pending) {
         if (response instanceof JsonRpcErrorResponse error) {
-            pending.future().completeExceptionally(new IllegalStateException(error.getError().message()));
+            pending.future().completeExceptionally(new CodexRpcException(error.getError().code(), error.getError().message(), error.getError().data(), pending.method()));
         } else {
             pending.complete(response);
         }

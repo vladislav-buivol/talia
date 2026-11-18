@@ -1,6 +1,7 @@
-package com.chatbot.talia.ws.adapter.codex.client;
+package com.chatbot.talia.ws.adapter.codex.client.transport;
 
-import com.chatbot.talia.ws.adapter.codex.listener.CodexWebSocketListener;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexMessageDispatcher;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,37 +11,53 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.Set;
 
 public class CodexWebSocketConnection implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(CodexWebSocketConnection.class);
-    static final int SEND_QUEUE_CAPACITY = 64;
-    private static final long CLOSE_TIMEOUT_SECONDS = 2;
     private final URI serverAddress;
+    private final CodexSettings settings;
     private final WebSocket.Listener listener;
     private final HttpClient httpClient;
     private final CodexMessageDispatcher dispatcher;
-    private final ExecutorService sender = new ThreadPoolExecutor(
-            1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(SEND_QUEUE_CAPACITY),
-            Thread.ofVirtual().name("codex-sender").factory()
-    );
+    private final ExecutorService sender;
     private final Set<CompletableFuture<?>> pendingSends = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean cleanupStarted = new AtomicBoolean();
     private final CompletableFuture<Void> closeCompletion = new CompletableFuture<>();
     private volatile WebSocket webSocket;
 
     public CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher) {
-        this(serverAddress, dispatcher, HttpClient.newHttpClient());
+        this(serverAddress, dispatcher, CodexSettings.local(serverAddress));
     }
 
-    CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher, HttpClient httpClient) {
+    public CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher, CodexSettings settings) {
+        this(serverAddress, dispatcher, HttpClient.newHttpClient(), settings);
+    }
+
+    public CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher, HttpClient httpClient) {
+        this(serverAddress, dispatcher, httpClient, CodexSettings.local(serverAddress));
+    }
+
+    CodexWebSocketConnection(URI serverAddress, CodexMessageDispatcher dispatcher, HttpClient httpClient, CodexSettings settings) {
         this.serverAddress = serverAddress;
+        this.settings = settings;
+        this.sender = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(settings.sendQueueCapacity()),
+                Thread.ofVirtual().name("codex-sender").factory());
         this.dispatcher = dispatcher;
-        this.listener = new CodexWebSocketListener(dispatcher, this::onPeerClose, this::abort);
+        this.listener = new CodexWebSocketListener(dispatcher, this::onPeerClose, this::abort, settings.maxMessageBytes());
         this.httpClient = httpClient;
     }
 
@@ -54,10 +71,10 @@ public class CodexWebSocketConnection implements AutoCloseable {
         }
         CompletableFuture<WebSocket> opening = httpClient
                 .newWebSocketBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
+                .connectTimeout(settings.connectTimeout())
                 .buildAsync(serverAddress, listener);
         try {
-            webSocket = opening.get(5, TimeUnit.SECONDS);
+            webSocket = opening.get(settings.connectTimeout().toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException | TimeoutException error) {
             opening.thenAccept(WebSocket::abort);
             abort(error);
@@ -72,7 +89,6 @@ public class CodexWebSocketConnection implements AutoCloseable {
         }
         return webSocket;
     }
-
 
     public CompletableFuture<WebSocket> ping(String message) {
         WebSocket socket = webSocket;
@@ -97,13 +113,13 @@ public class CodexWebSocketConnection implements AutoCloseable {
         return send(message, () -> false);
     }
 
-    CompletableFuture<Void> send(String message, BooleanSupplier requestFinished) {
+    public CompletableFuture<Void> send(String message, BooleanSupplier requestFinished) {
         WebSocket socket = webSocket;
         CompletableFuture<Void> result = trackSend(socket);
         if (!result.isDone()) {
             try {
-                sender.execute(new SendTask(message, result, socket, requestFinished, this::abort));
-                log.debug("WebSocket text sent: {}", message);
+                sender.execute(new SendTask(message, result, socket, requestFinished, this::abort, settings.sendTimeout()));
+                log.trace("WebSocket message enqueued");
             } catch (RejectedExecutionException error) {
                 result.completeExceptionally(error);
             }
@@ -133,7 +149,6 @@ public class CodexWebSocketConnection implements AutoCloseable {
         return ByteBuffer.wrap(bytes);
     }
 
-
     @Override
     public void close() {
         closeAsync();
@@ -158,7 +173,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         try {
             socket.sendClose(WebSocket.NORMAL_CLOSURE, "")
                     .copy()
-                    .orTimeout(CLOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .orTimeout(settings.closeTimeout().toMillis(), TimeUnit.MILLISECONDS)
                     .whenComplete((closed, error) -> finishClose(socket,
                             error instanceof CompletionException && error.getCause() != null ? error.getCause() : error));
         } catch (RuntimeException error) {
@@ -174,7 +189,7 @@ public class CodexWebSocketConnection implements AutoCloseable {
         }
     }
 
-    void abort(Throwable cause) {
+    public void abort(Throwable cause) {
         boolean closingStarted = dispatcher.beginClose(cause);
         if (closingStarted) {
             sender.shutdownNow();

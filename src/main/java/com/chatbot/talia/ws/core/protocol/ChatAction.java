@@ -9,6 +9,8 @@ public enum ChatAction {
     GET_HISTORY("getHistory"),
     GET_MODELS("getModels"),
     SEND_MESSAGE("sendMessage"),
+    CANCEL_TURN("cancelTurn"),
+    RESOLVE_APPROVAL("resolveApproval"),
     CHANGE_MODEL("changeModel"),
     CLOSE_CHAT("closeChat"),
     FINISH_CHAT("finishChat"),

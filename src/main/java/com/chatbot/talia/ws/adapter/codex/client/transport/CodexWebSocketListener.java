@@ -1,7 +1,7 @@
+package com.chatbot.talia.ws.adapter.codex.client.transport;
 
-package com.chatbot.talia.ws.adapter.codex.listener;
-
-import com.chatbot.talia.ws.adapter.codex.client.CodexMessageDispatcher;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexMessageDispatcher;
+import com.chatbot.talia.ws.adapter.codex.config.CodexSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,16 +15,24 @@ import java.util.function.Consumer;
 
 public class CodexWebSocketListener implements WebSocket.Listener {
 
-    private static final Logger log =
-            LoggerFactory.getLogger(CodexWebSocketListener.class);
+    private static final Logger log = LoggerFactory.getLogger(CodexWebSocketListener.class);
 
     private final CodexMessageDispatcher dispatcher;
     private final Consumer<Throwable> onPeerClose;
     private final Consumer<Throwable> onFailure;
     private final StringBuilder fragments = new StringBuilder();
+    private final int maxMessageBytes;
+    private int accumulatedBytes;
 
     public CodexWebSocketListener(CodexMessageDispatcher dispatcher,
                                   Consumer<Throwable> onPeerClose, Consumer<Throwable> onFailure) {
+        this(dispatcher, onPeerClose, onFailure, CodexSettings.DEFAULT_MAX_MESSAGE_BYTES);
+    }
+
+    public CodexWebSocketListener(CodexMessageDispatcher dispatcher,
+                                  Consumer<Throwable> onPeerClose, Consumer<Throwable> onFailure,
+                                  int maxMessageBytes) {
+        this.maxMessageBytes = maxMessageBytes;
         this.dispatcher = Objects.requireNonNull(dispatcher);
         this.onPeerClose = Objects.requireNonNull(onPeerClose);
         this.onFailure = Objects.requireNonNull(onFailure);
@@ -38,14 +46,26 @@ public class CodexWebSocketListener implements WebSocket.Listener {
 
     @Override
     public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+        accumulatedBytes += data.toString().getBytes(StandardCharsets.UTF_8).length;
+        if (accumulatedBytes > maxMessageBytes) {
+            fragments.setLength(0);
+            accumulatedBytes = 0;
+            onFailure.accept(new IOException("Codex WebSocket message exceeds configured limit"));
+            return WebSocket.Listener.super.onText(webSocket, data, last);
+        }
         fragments.append(data);
 
         if (last) {
             String json = fragments.toString();
             fragments.setLength(0);
+            accumulatedBytes = 0;
 
-            log.debug("WebSocket text received: {}", json);
-            dispatcher.onTextMessage(json);
+            try {
+                dispatcher.onTextMessage(json);
+            } catch (RuntimeException error) {
+                log.warn("Malformed or unhandled Codex protocol message", error);
+                onFailure.accept(error);
+            }
         }
 
         return WebSocket.Listener.super.onText(webSocket, data, last);
@@ -88,7 +108,7 @@ public class CodexWebSocketListener implements WebSocket.Listener {
         WebSocket.Listener.super.onError(webSocket, error);
     }
 
-    private String convertToString(ByteBuffer message) {
+    private static String convertToString(ByteBuffer message) {
         return StandardCharsets.UTF_8.decode(message.duplicate()).toString();
     }
 }
