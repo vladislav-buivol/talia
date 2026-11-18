@@ -40,9 +40,13 @@ public class CodexClient implements AutoCloseable {
     }
 
     public static CodexClient create(String serverUrl) {
+        return create(CodexSettings.local(java.net.URI.create(serverUrl)));
+    }
+
+    public static CodexClient create(CodexSettings settings) {
         CodexMessageCodec codec = new CodexMessageCodec(new ObjectMapper());
         CodexMessageHandlerRegistry registry = CodexMessageHandlerRegistry.create(new CodexMessageReporter());
-        return new CodexClient(new CodexWebSocketClient(serverUrl, codec, registry));
+        return new CodexClient(new CodexWebSocketClient(settings, codec, registry));
     }
 
     /** Accesses the typed RPC API on this client's session. */

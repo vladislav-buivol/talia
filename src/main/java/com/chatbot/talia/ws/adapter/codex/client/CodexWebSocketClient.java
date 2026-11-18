@@ -37,14 +37,22 @@ public class CodexWebSocketClient implements AutoCloseable {
     private final AtomicLong nextRequestId = new AtomicLong();
     private final AtomicBoolean handshakeStarted = new AtomicBoolean();
     private volatile boolean initialized;
+    private final CodexSettings settings;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public CodexWebSocketClient(
             @Value("${talia.codex.url}") String serverUrl,
             CodexMessageCodec messageCodec,
             CodexMessageHandlerRegistry handlerRegistry) {
+        this(CodexSettings.local(URI.create(serverUrl)), messageCodec, handlerRegistry);
+    }
+
+    public CodexWebSocketClient(CodexSettings settings, CodexMessageCodec messageCodec,
+            CodexMessageHandlerRegistry handlerRegistry) {
+        this.settings = settings;
         this.messageCodec = messageCodec;
-        this.dispatcher = new CodexMessageDispatcher(messageCodec, handlerRegistry);
-        this.connection = new CodexWebSocketConnection(URI.create(serverUrl), dispatcher);
+        this.dispatcher = new CodexMessageDispatcher(messageCodec, handlerRegistry, settings.rpcTimeout());
+        this.connection = new CodexWebSocketConnection(settings.url(), dispatcher);
     }
 
     public CompletableFuture<InitializeResponse> connectAndInitialize(String name, String title, String version) {
@@ -172,9 +180,16 @@ public class CodexWebSocketClient implements AutoCloseable {
 
     private <R extends JsonRpcSuccessResponse<?>> CompletableFuture<R> sendRequest(
             CodexRequest<?> request, Class<R> responseType) {
-        PendingRequest<R> pending = new PendingRequest<>(Objects.requireNonNull(responseType), new CompletableFuture<>());
+        PendingRequest<R> pending = new PendingRequest<>(Objects.requireNonNull(responseType),
+                new CompletableFuture<>(), request.method(), timeoutFor(request.method()));
         sendRequest(request, pending);
         return pending.future();
+    }
+
+    private java.time.Duration timeoutFor(String method) {
+        if (CodexMethod.TURN_START.value().equals(method)) return settings.turnStartTimeout();
+        if (CodexMethod.TURN_INTERRUPT.value().equals(method)) return settings.interruptTimeout();
+        return settings.rpcTimeout();
     }
 
     private void sendRequest(CodexRequest<?> request, PendingRequest<?> pending) {
