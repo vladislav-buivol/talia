@@ -1,0 +1,68 @@
+TALIA — LOCAL STARTUP (WINDOWS 11)
+==================================
+
+Goal: Run Talia locally with its React UI, VRM avatar and mandatory OmniVoice TTS.
+No new BAT scripts or code changes are needed.
+
+REQUIREMENTS (install once)
+---------------------------
+- JDK 25 (JAVA_HOME configured)
+- Git
+- Node.js and npm
+- OpenAI Codex CLI, installed with: npm install -g @openai/codex@latest
+- Codex authentication: codex login
+- Conda environment named "omnivoice" with OmniVoice, PyTorch, SoundFile,
+  FastAPI and Uvicorn installed (per the project frontend README)
+- Local TTS voice references: voice.wav and tts/voice.txt
+- Maven installation is NOT required: the repository contains mvnw.cmd
+
+GET PROJECT (first time only)
+-----------------------------
+git clone https://github.com/vladislav-buivol/talia.git
+cd talia
+
+START PROJECT (4 SEPARATE TERMINALS)
+------------------------------------
+Run each command from the project ROOT folder.
+
+Terminal 1 — Codex App Server:
+  codex app-server --listen ws://127.0.0.1:4222
+
+Terminal 2 — Spring Boot backend (Codex profile):
+  .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=codex"
+
+Terminal 3 — OmniVoice TTS (required):
+  .\codex-integration\3_start-omnivoice.bat
+
+Terminal 4 — React UI with VRM avatar:
+  .\codex-integration\2_start-ui.bat
+
+OPEN UI
+-------
+1. Open http://localhost:5173 (the URL printed by Vite).
+2. Click "Connect to Talia".
+3. Confirm the WebSocket URL: ws://localhost:8080/ws/chat
+4. Click "Enable voice" in the Talia avatar panel.
+5. Chat normally; TTS replies use the running OmniVoice service.
+
+LOCAL PORTS
+-----------
+4222 — Codex App Server
+8080 — Spring Boot chat WebSocket
+8001 — OmniVoice FastAPI TTS service
+5173 — Vite UI
+
+NOTES
+-----
+- OmniVoice is required for the intended full Talia experience, not an optional step.
+- The repository already contains the TTS and UI startup scripts. Do not add
+  a separate omnivoice-demo launcher for this setup: Talia uses tts/serve.py.
+- Existing TTS launcher expects Python at
+  %USERPROFILE%\miniconda3\envs\omnivoice\python.exe unless TALIA_TTS_PYTHON
+  is set to another path.
+- The UI start script installs frontend dependencies automatically if needed.
+- TTS service runs locally at 127.0.0.1:8001 and serves POST /api/tts.
+- Leave all four terminal processes running while using Talia.
+
+Project: https://github.com/vladislav-buivol/talia
+Project docs: https://github.com/vladislav-buivol/talia/blob/master/frontend/README.md
