@@ -16,10 +16,14 @@ npm run dev
 ```
 
 Run `npm install` on the first start or after dependencies change. On Windows,
-you can instead run `codex-integration\start-ui.bat` from the project root.
+you can instead run `codex-integration\2_start-ui.bat` from the project root.
 Open the address shown by Vite (normally http://localhost:5173), check the
 WebSocket URL (default `ws://localhost:8080/ws/chat`), and click **Connect to
 Talia**. See the [frontend README](../frontend/README.md) for prerequisites.
+
+For spoken replies on Windows, run `codex-integration\3_start-omnivoice.bat`
+in its own window. Wait for Uvicorn to listen on `127.0.0.1:8001` and click
+**Enable voice** in Talia.
 
 The UI lists and opens chats, shows history and streaming messages, and offers
 reader and writer actions according to the server's current response. It also

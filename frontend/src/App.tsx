@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import AvatarPanel from "./avatar/AvatarPanel";
 import type { Action, ApprovalPrompt, ChatEvent, ChatMessage, ChatRequest, Dialog } from "./protocol";
+import { useReplyVoice } from "./voice/useReplyVoice";
 
 const labels: Record<Action, string> = {
   startNewDialog: "New chat", continueDialog: "Select chat", getDialogs: "Load chats",
@@ -19,6 +21,8 @@ export default function App() {
   const pendingRequest = useRef<string | null>(null);
   const messageRevision = useRef(0);
   const historyRevision = useRef(0);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const spokenReply = useRef<{ turnId: string; text: string } | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
   const [serverUrl, setServerUrl] = useState("ws://localhost:8080/ws/chat");
   const [actions, setActions] = useState<Action[]>([]);
@@ -39,9 +43,18 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<ApprovalPrompt[]>([]);
+  const [thinking, setThinking] = useState(false);
+  const [nod, setNod] = useState(0);
+  const voice = useReplyVoice();
 
   useEffect(() => () => socket.current?.close(), []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
+
+  function updateMessages(next: ChatMessage[] | ((previous: ChatMessage[]) => ChatMessage[])) {
+    const updated = typeof next === "function" ? next(messagesRef.current) : next;
+    messagesRef.current = updated;
+    setMessages(updated);
+  }
 
   function sendJson(connection: WebSocket, request: ChatRequest) {
     const json = JSON.stringify(request);
@@ -91,6 +104,9 @@ export default function App() {
         setSelected(data.threadId ?? null);
         break;
       case "session.joined":
+        voice.stop();
+        spokenReply.current = null;
+        setThinking(Boolean(data.turnId));
         setApprovals([]);
         threadRef.current = data.threadId ?? null;
         messageRevision.current = 0;
@@ -99,7 +115,7 @@ export default function App() {
         setClientId(data.clientId ?? null);
         setWriterId(data.writerId ?? null);
         setParticipants(data.writerId && data.writerId !== data.clientId ? [data.writerId] : []);
-        setMessages([]);
+        updateMessages([]);
         setNotice(data.turnId ? "A response is already in progress. You will see new text as it arrives." : "");
         if (event.availableAction.includes("getHistory")) {
           historyRevision.current = messageRevision.current;
@@ -108,20 +124,27 @@ export default function App() {
         break;
       case "history":
         if (data.threadId === threadRef.current && historyRevision.current === messageRevision.current) {
-          setMessages(data.messages ?? []);
+          updateMessages(data.messages ?? []);
         } else if (data.threadId === threadRef.current) {
           setNotice("New messages arrived while history was loading. Load history again after the turn finishes.");
         }
         break;
       case "user.text":
         if (data.threadId !== threadRef.current) break;
+        voice.stop();
+        spokenReply.current = data.turnId ? { turnId: data.turnId, text: "" } : null;
+        setThinking(true);
+        setNod(previous => previous + 1);
         messageRevision.current += 1;
-        setMessages(previous => [...previous, { role: "USER", text: data.text ?? "", turnId: data.turnId ?? undefined }]);
+        updateMessages(previous => [...previous, { role: "USER", text: data.text ?? "", turnId: data.turnId ?? undefined }]);
         break;
       case "assistant.text.delta":
         if (data.threadId !== threadRef.current) break;
+        if (spokenReply.current && spokenReply.current.turnId === data.turnId) {
+          spokenReply.current.text += data.text ?? "";
+        }
         messageRevision.current += 1;
-        setMessages(previous => {
+        updateMessages(previous => {
           const last = previous.at(-1);
           if (last?.role === "ASSISTANT" && last.turnId === data.turnId) {
             return [...previous.slice(0, -1), { ...last, text: last.text + (data.text ?? "") }];
@@ -136,10 +159,20 @@ export default function App() {
       case "approval.resolved":
         setApprovals(previous => previous.filter(p => p.requestId !== data.requestId));
         break;
-      case "assistant.text.done":
+      case "assistant.text.done": {
+        if (data.threadId !== threadRef.current) break;
+        const reply = spokenReply.current;
+        if (reply && reply.turnId !== data.turnId) break;
+        spokenReply.current = null;
+        setThinking(false);
         setApprovals([]);
         if (data.status && data.status !== "completed") setNotice(data.errorMessage || `Turn ${data.status}`);
+        if (reply && data.status === "completed") {
+          const context = messagesRef.current.filter(message => message.role !== "ASSISTANT" || message.turnId !== reply.turnId);
+          void voice.speak(reply.text, context);
+        }
         break;
+      }
       case "writer.changed":
       case "session.updated":
         setWriterId(data.writerId ?? null);
@@ -155,18 +188,26 @@ export default function App() {
       case "chat.deleted":
         setApprovals([]);
         if (data.threadId === threadRef.current) {
+          voice.stop();
+          spokenReply.current = null;
+          setThinking(false);
           threadRef.current = null;
           setThread(null);
           setWriterId(null);
           setClientId(null);
           setParticipants([]);
-          setMessages([]);
+          updateMessages([]);
         }
         setSelected(null);
         if (event.type === "chat.deleted") setDialogs(previous => previous.filter(dialog => dialog.threadId !== data.threadId));
         setNotice(event.type === "chat.deleted" ? "Chat deleted." : "Returned to the chat menu.");
         break;
       case "error":
+        if (data.threadId === threadRef.current && data.code === "turn_failed" &&
+            (!spokenReply.current || spokenReply.current.turnId === data.turnId)) {
+          spokenReply.current = null;
+          setThinking(false);
+        }
         setError(data.message ?? "The request failed.");
         break;
     }
@@ -185,6 +226,7 @@ export default function App() {
     setStatus("connecting");
     socket.current = connection;
     connection.onmessage = message => {
+      if (socket.current !== connection) return;
       try {
         const event = JSON.parse(message.data) as ChatEvent;
         if (!Array.isArray(event.availableAction) || typeof event.type !== "string") throw new Error();
@@ -196,6 +238,9 @@ export default function App() {
     connection.onerror = () => setError(`Could not connect to ${serverUrl.trim()}. Check the URL, server, and allowed origins.`);
     connection.onclose = () => {
       if (socket.current !== connection) return;
+      voice.stop();
+      spokenReply.current = null;
+      setThinking(false);
       socket.current = null;
       threadRef.current = null;
       pendingRequest.current = null;
@@ -209,7 +254,7 @@ export default function App() {
       setParticipants([]);
       setDialogs([]);
       setCursor(undefined);
-      setMessages([]);
+      updateMessages([]);
       setApprovals([]);
       setModels([]);
       setModel("");
@@ -288,7 +333,7 @@ export default function App() {
         <div className="sidebar-footer"><span className="footer-icon">✳</span><div><strong>Made for conversation</strong><small>Connected to your workspace</small></div></div>
       </aside>
 
-      <main className="main">
+      <main className="main chat-layout">
         <header className="topbar">
           <div><span className="eyebrow">YOUR SPACE / CHAT</span><h1>{thread ? "Conversation" : "Chat workspace"}</h1></div>
           <div className="top-status"><span className={`status-dot ${status}`} />{status === "connected" ? "Online" : status === "connecting" ? "Connecting" : "Offline"}</div>
@@ -333,6 +378,7 @@ export default function App() {
           <div className="composer"><textarea aria-label="Message" placeholder={thread ? available("sendMessage") ? "Write a message to Talia…" : "You’re connected as a reader or a response is in progress." : "Open a chat to start messaging…"} value={draft} disabled={!available("sendMessage") || !!pending} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitMessage(); } }} /><button aria-label="Send message" className="send-button" disabled={!available("sendMessage") || !draft.trim() || !!pending} onClick={submitMessage}>↑</button></div>
           <div className="composer-hint"><span>Enter to send · Shift + Enter for a new line</span><span>TALIA CHAT</span></div>
         </div>
+        <AvatarPanel thinking={thinking} chatNod={nod} voice={voice} />
       </main>
     </div>
   );
