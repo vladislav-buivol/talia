@@ -28,6 +28,8 @@ Enter the Talia WebSocket URL in the connection card. The default is
 Talia permits the default local Vite origins; if your UI runs from another
 origin, configure `talia.chat.allowed-origins` in the Codex profile.
 Available actions and their changes come from the server's core protocol responses.
+New chats use `gpt-5.6-luna`. Open **Logs** to see the destinations of sent
+messages, WebSocket replies and their chat and turn IDs.
 
 To check the TypeScript and build the frontend, run `npm run build` (or
 `pnpm run build`).
@@ -35,19 +37,22 @@ To check the TypeScript and build the frontend, run `npm run build` (or
 ## Avatar and voice
 
 The React component at `src/avatar/TaliaAvatar.tsx` renders
-`public/models/talia.vrm` with Three.js. It blinks in idle, nods when the
-chat confirms a new user message, and changes its head movement between
-thinking and speaking.
+`public/models/talia.vrm` with Three.js. It blinks in idle, shows a thinking
+pose and follows the speech plan for facial expressions and gestures.
 
 Drag the avatar viewport to orbit, right-drag to pan, and scroll to zoom.
 On touch screens, drag to orbit and use two fingers to pan or zoom.
 **Reset view** restores the initial framing for the current activity.
+**Expand** enlarges the avatar within the page. **Pop out** opens a separate,
+resizable window that you can move around the desktop. Use **Dock avatar**
+to return the avatar to the page.
 
-Catwalk Idle loops by default and resumes after a preview. Open **Test avatar**
+Try asking Talia to dance or do a backflip. The reply planner can start a full-body
+animation even when voice is muted. **Stop animation** returns to the idle pose.
+Catwalk Idle loops by default and resumes after an animation. Open **Test avatar**
 to preview the original **Dance** or choose a VRMA clip or pose and click
 **Play**. Clips play once and poses hold until you click **Stop motion** or
-start another movement. Select **Play audio** during a preview to test lip sync
-with a local audio file. Lip movements follow the audio level and blend five
+start another movement. Lip movements follow the audio level and blend five
 vowel shapes based on the sound.
 
 On Windows, run [3_start-omnivoice.bat](../codex-integration/3_start-omnivoice.bat)
@@ -69,19 +74,26 @@ python tts/serve.py
 The process listens on `127.0.0.1:8001`. Vite forwards `/api/tts` there
 locally. You can set `TALIA_TTS_MODEL` to the path of an existing model
 snapshot, or let OmniVoice load `k2-fsa/OmniVoice` from its cache or
-Hugging Face. In the avatar panel, click **Enable voice** and send a message.
-Once the reply is complete, its audio plays through the browser. Click
-**Voice on** again to mute and halt local playback.
+Hugging Face. Voice is on by default. The browser activates audio when you
+first interact with the page, such as when you connect to Talia. Once the
+reply is complete, its audio plays through the browser. **Default voice** uses
+the bundled voice recording. Use **Upload WAV / MP3** to choose your own
+recording of clear speech. Uploaded recordings stay available until the
+speech service restarts. You can also preconfigure your recording and its
+transcript with `TALIA_VOICE_AUDIO` and `TALIA_VOICE_TEXT`.
 
-The service uses `voice.wav` in the project root as its voice reference.
-Its spoken words are stored in `tts/voice.txt`. To change voices, replace
-the reference and transcript together, then restart the service. The paths can
-also be configured with `TALIA_VOICE_AUDIO` and `TALIA_VOICE_TEXT`.
+The local `codex` CLI runs one ephemeral conversation per reply. It prepares
+speakable phrases, detects the language and selects animations, expressions,
+gestures and [OmniVoice tags](../omnivoice_ui_setup/omnivoice_emotion_tags.txt).
+The speech service strips URLs before synthesis. If the planner is unavailable,
+Talia reads cleaned text in the default language with neutral reactions.
 
-For each spoken reply, the TTS service uses the local `codex` CLI to run a
-separate, ephemeral conversation with the reply and up to eight recent chat
-messages. The result selects the spoken language and supported voice attributes.
-The defaults are `female`, `young adult`, `moderate pitch` and automatic style.
-For English, OmniVoice uses the selected accent or defaults to `russian accent`.
-For Chinese it can use a supported regional dialect. An unknown language or an
-unavailable Codex classifier falls back to Russian.
+Talia acknowledges new messages with a nod and a brief spoken cue while the
+reply is in progress. Progress messages from Codex update the status below the
+conversation. Open **Test audio**, enter text and click **Play test** to hear
+the selected voice even when chat audio is muted.
+
+**Stop audio** or sending a new message interrupts playback immediately. The
+player tracks the current phrase and elapsed audio time. The next speech plan
+can decide to continue the old recording from that position after the new reply.
+Click **Voice on** to mute and clear the interrupted recording.

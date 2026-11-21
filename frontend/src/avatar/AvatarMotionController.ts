@@ -1,5 +1,6 @@
 import type { VRM } from "@pixiv/three-vrm";
 import { AnimationMixer, Euler, LoopOnce, LoopRepeat, MathUtils, Quaternion, type AnimationAction, type AnimationClip } from "three";
+import type { SpeechSegment } from "../voice/SpeechClient";
 
 export type AvatarMode = "idle" | "thinking" | "speaking";
 
@@ -16,6 +17,8 @@ export class AvatarMotionController {
   private actionKind?: "idle" | "clip" | "pose";
   private elapsed = 0;
   private nodStarted = -Infinity;
+  private gesture: SpeechSegment["motion"] = "none";
+  private gestureStarted = 0;
   mode: AvatarMode = "idle";
 
   constructor(private readonly model: VRM) {
@@ -28,6 +31,11 @@ export class AvatarMotionController {
 
   nod() {
     this.nodStarted = this.elapsed;
+  }
+
+  react(gesture: SpeechSegment["motion"]) {
+    this.gesture = gesture;
+    this.gestureStarted = this.elapsed;
   }
 
   play(clip: AnimationClip, holdPose: boolean) {
@@ -89,10 +97,21 @@ export class AvatarMotionController {
       const nodProgress = MathUtils.clamp((this.elapsed - this.nodStarted) / 0.48, 0, 1);
       const nodAngle = Math.sin(nodProgress * Math.PI) * 0.23;
       const thinking = this.mode === "thinking";
-      const amplitude = this.mode === "speaking" ? 0.035 : 0.012;
-      const pitch = (thinking ? -0.07 : 0) + Math.sin(this.elapsed * 2) * amplitude;
+      const phase = Math.min((this.elapsed - this.gestureStarted) / 0.9, 1);
+      const ease = Math.sin(phase * Math.PI);
+      const beat = Math.sin(phase * 4 * Math.PI) * ease;
+      let pitch = (thinking ? -0.07 : 0) + Math.sin(this.elapsed * 2) * 0.012;
+      let yaw = 0;
+      let roll = thinking ? 0.065 : 0;
+      switch (this.gesture) {
+        case "nod": pitch += 0.23 * ease; break;
+        case "tilt": roll += 0.22 * ease; break;
+        case "shake": yaw += 0.20 * beat; break;
+        case "bounce": pitch -= 0.19 * Math.abs(beat); roll += 0.10 * beat; break;
+      }
       this.reaction.x = MathUtils.damp(this.reaction.x, pitch + nodAngle, 16, dt);
-      this.reaction.z = MathUtils.damp(this.reaction.z, thinking ? 0.065 : 0, 8, dt);
+      this.reaction.y = MathUtils.damp(this.reaction.y, yaw, 18, dt);
+      this.reaction.z = MathUtils.damp(this.reaction.z, roll, 12, dt);
       this.head.quaternion.multiply(this.reactionRotation.setFromEuler(this.reaction));
     }
     return false;

@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "preset_name": "voice",
+  "created_date": "2026-11-21",
+  "model": {
+    "name": "VoxCPM2",
+    "source": "openbmb/VoxCPM2",
+    "revision": null,
+    "mode": "voice_design"
+  },
+  "voice_description": {
+    "language": "ru",
+    "perceived_voice": "young female",
+    "pitch": "slightly high",
+    "timbre": [
+      "soft",
+      "sweet",
+      "warm",
+      "full"
+    ],
+    "delivery": [
+      "naturally smiling",
+      "affectionate",
+      "playful",
+      "gently teasing",
+      "subtle yandere character"
+    ],
+    "pacing": "moderate",
+    "expressiveness": "subtle and controlled"
+  },
+  "prompts": {
+    "control_instruction_language": "zh",
+    "control_instruction": "年轻女性，声音柔和甜美，音调略高，音色温暖饱满。带有病娇气质，说话时仿佛带着自然的微笑，语气亲昵、俏皮，略带调皮和撒娇。语速适中，语调自然灵动，情绪变化细腻而克制，像在轻松地与熟悉的人聊天。用自然流畅的俄语说话。",
+    "target_text_language": "ru",
+    "target_text": "Слышишь? Кажется, снова начинается дождь. А ведь утром было такое хорошее солнышко. Хм, забавно... Знаешь, мне даже нравится такая погода. Особенно когда можно остаться дома, устроиться поудобнее и просто поболтать с тобой. А тебе?"
+  },
+  "generation_settings": {
+    "cfg_guidance_scale": 2.0,
+    "locdit_flow_matching_steps": 50,
+    "seed": 1170577108,
+    "random_seed": false,
+    "ultimate_cloning_mode": false,
+    "reference_audio": null,
+    "reference_audio_enhancement": false,
+    "text_normalization": false
+  },
+  "generated_sample": {
+    "suggested_filename": "voice.wav",
+    "saved_file_path": null,
+    "duration_seconds_approx": 20,
+    "sha256": null,
+    "note": "Download and save the actual Generated Audio WAV from Gradio. The WAV is not embedded in this JSON."
+  },
+  "reproducibility": {
+    "settings_captured_from_screenshot": true,
+    "exact_audio_reproduction_guaranteed": false,
+    "note": "Keep the generated WAV and record the precise VoxCPM2 model revision, software versions, and any postprocessing if exact provenance matters."
+  }
+}

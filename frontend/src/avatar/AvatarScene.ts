@@ -10,6 +10,8 @@ export class AvatarScene {
   private readonly renderer: WebGLRenderer;
   private readonly orbit: OrbitControls;
   private readonly observer: ResizeObserver;
+  private readonly view: Window;
+  private frame = 0;
   private portrait?: ViewFrame;
   private fullBody?: ViewFrame;
   private hips?: Object3D;
@@ -18,8 +20,9 @@ export class AvatarScene {
   private readonly motionOffset = new Vector3();
 
   constructor(canvas: HTMLCanvasElement, private readonly viewport: HTMLElement) {
+    this.view = canvas.ownerDocument.defaultView ?? window;
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(this.view.devicePixelRatio, 1.5));
 
     const key = new DirectionalLight(0xfff5e7, 2);
     key.position.set(1, 2, 3);
@@ -73,12 +76,14 @@ export class AvatarScene {
   }
 
   start(update: (now: number) => void) {
-    this.renderer.setAnimationLoop(now => {
+    const render = (now: number) => {
       update(now);
       this.trackHorizontalMovement();
       this.orbit.update();
       this.renderer.render(this.scene, this.camera);
-    });
+      this.frame = this.view.requestAnimationFrame(render);
+    };
+    this.frame = this.view.requestAnimationFrame(render);
   }
 
   private trackHorizontalMovement() {
@@ -97,7 +102,7 @@ export class AvatarScene {
 
   dispose() {
     this.observer.disconnect();
-    this.renderer.setAnimationLoop(null);
+    this.view.cancelAnimationFrame(this.frame);
     this.orbit.dispose();
     this.renderer.dispose();
   }

@@ -7,6 +7,7 @@ import com.chatbot.talia.ws.adapter.codex.protocol.message.CodexServerRequestPar
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ApprovalDecisionResult;
 import org.junit.jupiter.api.Test;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
@@ -56,10 +57,25 @@ class ApprovalCoordinatorTests {
         coordinator.close();
     }
 
+    @Test
+    void mcpElicitationReturnsCancellationWithTheOriginalRequestId() {
+        var id = new CodexMessageCodec.StringRequestId("mcp-input-1");
+        var params = new CodexServerRequestParams("thr", "turn", null, null, null, null, "example");
+        var request = new CodexMessageCodec.ServerRequest(id,
+                ServerRequestMethod.MCP_SERVER_ELICITATION_REQUEST, "mcpServer/elicitation/request", params);
+
+        try (var coordinator = new ApprovalCoordinator(rpc, Duration.ofSeconds(10))) {
+            coordinator.receive(request);
+        }
+
+        verify(rpc).sendServerResult(id, Map.of("action", "cancel"));
+        verifyNoMoreInteractions(rpc);
+    }
+
     private CodexMessageCodec.ServerRequest request(CodexMessageCodec.RequestId id,
             ServerRequestMethod method, String wire) {
         CodexServerRequestParams params = new CodexServerRequestParams(
-                "thr", "turn", null, "testing", "mvn test", null);
+                "thr", "turn", null, "testing", "mvn test", null, null);
         return new CodexMessageCodec.ServerRequest(id, method, wire, params);
     }
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import AvatarPanel from "./avatar/AvatarPanel";
 import type { Action, ApprovalPrompt, ChatEvent, ChatMessage, ChatRequest, Dialog } from "./protocol";
 import { useReplyVoice } from "./voice/useReplyVoice";
+import { replyAcknowledgement } from "./voice/replyAcknowledgement";
 
 const labels: Record<Action, string> = {
   startNewDialog: "New chat", continueDialog: "Select chat", getDialogs: "Load chats",
@@ -13,6 +14,9 @@ const labels: Record<Action, string> = {
 };
 
 const deletion = new Set<Action>(["deleteChat", "closeChatAndDelete", "finishChatAndDelete"]);
+const defaultModel = "gpt-5.6-luna";
+
+type TrafficEntry = { time: string; direction: "Sent" | "Received"; route: string; chat: string | null; event: string; detail?: string };
 
 export default function App() {
   const socket = useRef<WebSocket | null>(null);
@@ -23,6 +27,7 @@ export default function App() {
   const historyRevision = useRef(0);
   const messagesRef = useRef<ChatMessage[]>([]);
   const spokenReply = useRef<{ turnId: string; text: string } | null>(null);
+  const submittedTurn = useRef<string | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
   const [serverUrl, setServerUrl] = useState("ws://localhost:8080/ws/chat");
   const [actions, setActions] = useState<Action[]>([]);
@@ -35,8 +40,9 @@ export default function App() {
   const [participants, setParticipants] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
-  const [model, setModel] = useState("");
-  const [models, setModels] = useState<string[]>([]);
+  const [activeModel, setActiveModel] = useState(defaultModel);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [traffic, setTraffic] = useState<TrafficEntry[]>([]);
   const [limit, setLimit] = useState(10);
   const [threadInput, setThreadInput] = useState("");
   const [error, setError] = useState("");
@@ -44,8 +50,10 @@ export default function App() {
   const [pending, setPending] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<ApprovalPrompt[]>([]);
   const [thinking, setThinking] = useState(false);
-  const [nod, setNod] = useState(0);
-  const voice = useReplyVoice();
+  const [turnProgress, setTurnProgress] = useState("");
+  const [addressed, setAddressed] = useState(0);
+  const voice = useReplyVoice(() => logTraffic("Sent", new URL("/api/tts/plan", window.location.href).href,
+    threadRef.current, "POST · Ephemeral speech planning"));
 
   useEffect(() => () => socket.current?.close(), []);
   useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
@@ -59,7 +67,13 @@ export default function App() {
   function sendJson(connection: WebSocket, request: ChatRequest) {
     const json = JSON.stringify(request);
     connection.send(json);
-    console.log(`[BACKEND] >>> ${json}`);
+    logTraffic("Sent", connection.url, ("threadId" in request ? request.threadId : undefined) ?? threadRef.current,
+      request.action, json);
+  }
+
+  function logTraffic(direction: TrafficEntry["direction"], route: string, chat: string | null, event: string, detail?: string) {
+    const entry = { time: new Date().toLocaleTimeString(), direction, route, chat, event, detail };
+    setTraffic(previous => [...previous.slice(-99), entry]);
   }
 
   function send(request: ChatRequest) {
@@ -75,6 +89,7 @@ export default function App() {
   function receive(event: ChatEvent) {
     setActions(event.availableAction);
     const data = event.data ?? {};
+    const requestedAction = pendingRequest.current;
     const pendingReplies: Record<string, string[]> = {
       startNewDialog: ["session.joined"], continueDialog: ["dialog.selected"],
       getDialogs: ["dialogs"], getHistory: ["history"], sendMessage: ["user.text"],
@@ -91,10 +106,6 @@ export default function App() {
     switch (event.type) {
       case "connected":
         setStatus("connected");
-        if (event.availableAction.includes("getModels")) send({ type: "GET", action: "getModels" });
-        break;
-      case "models":
-        setModels(data.models ?? []);
         break;
       case "dialogs":
         setDialogs(data.dialogs ?? []);
@@ -104,20 +115,23 @@ export default function App() {
         setSelected(data.threadId ?? null);
         break;
       case "session.joined":
-        voice.stop();
+        voice.reset();
         spokenReply.current = null;
+        submittedTurn.current = null;
         setThinking(Boolean(data.turnId));
+        setTurnProgress("");
         setApprovals([]);
         threadRef.current = data.threadId ?? null;
         messageRevision.current = 0;
         setThread(data.threadId ?? null);
+        setActiveModel(data.model ?? defaultModel);
         setSelected(null);
         setClientId(data.clientId ?? null);
         setWriterId(data.writerId ?? null);
         setParticipants(data.writerId && data.writerId !== data.clientId ? [data.writerId] : []);
         updateMessages([]);
         setNotice(data.turnId ? "A response is already in progress. You will see new text as it arrives." : "");
-        if (event.availableAction.includes("getHistory")) {
+        if (requestedAction !== "startNewDialog" && event.availableAction.includes("getHistory")) {
           historyRevision.current = messageRevision.current;
           if (socket.current) sendJson(socket.current, { type: "GET", action: "getHistory", limit: 50 });
         }
@@ -131,18 +145,28 @@ export default function App() {
         break;
       case "user.text":
         if (data.threadId !== threadRef.current) break;
-        voice.stop();
+        if (requestedAction === "sendMessage") submittedTurn.current = data.turnId ?? null;
+        voice.stopReply();
         spokenReply.current = data.turnId ? { turnId: data.turnId, text: "" } : null;
         setThinking(true);
-        setNod(previous => previous + 1);
+        setAddressed(count => count + 1);
+        setTurnProgress(replyAcknowledgement(data.text ?? "").text);
+        voice.acknowledge(data.text ?? "");
         messageRevision.current += 1;
         updateMessages(previous => [...previous, { role: "USER", text: data.text ?? "", turnId: data.turnId ?? undefined }]);
+        break;
+      case "assistant.progress":
+        if (data.threadId === threadRef.current && spokenReply.current?.turnId === data.turnId && data.text?.trim()) {
+          setTurnProgress(data.text);
+          voice.updateProgress(data.text);
+        }
         break;
       case "assistant.text.delta":
         if (data.threadId !== threadRef.current) break;
         if (spokenReply.current && spokenReply.current.turnId === data.turnId) {
           spokenReply.current.text += data.text ?? "";
         }
+        setTurnProgress("");
         messageRevision.current += 1;
         updateMessages(previous => {
           const last = previous.at(-1);
@@ -163,13 +187,17 @@ export default function App() {
         if (data.threadId !== threadRef.current) break;
         const reply = spokenReply.current;
         if (reply && reply.turnId !== data.turnId) break;
+        if (submittedTurn.current === data.turnId) submittedTurn.current = null;
         spokenReply.current = null;
         setThinking(false);
+        setTurnProgress("");
         setApprovals([]);
         if (data.status && data.status !== "completed") setNotice(data.errorMessage || `Turn ${data.status}`);
-        if (reply && data.status === "completed") {
+        if (reply?.text.trim() && data.status === "completed") {
           const context = messagesRef.current.filter(message => message.role !== "ASSISTANT" || message.turnId !== reply.turnId);
           void voice.speak(reply.text, context);
+        } else {
+          voice.stopReply();
         }
         break;
       }
@@ -180,7 +208,7 @@ export default function App() {
         if (data.leftClientId) setParticipants(previous => previous.filter(id => id !== data.leftClientId));
         break;
       case "model.changed":
-        setModel(data.model ?? "");
+        setActiveModel(data.model ?? defaultModel);
         setNotice(`Model selected: ${data.model}`);
         break;
       case "chat.closed":
@@ -188,9 +216,10 @@ export default function App() {
       case "chat.deleted":
         setApprovals([]);
         if (data.threadId === threadRef.current) {
-          voice.stop();
+          voice.reset();
           spokenReply.current = null;
           setThinking(false);
+          setTurnProgress("");
           threadRef.current = null;
           setThread(null);
           setWriterId(null);
@@ -203,10 +232,23 @@ export default function App() {
         setNotice(event.type === "chat.deleted" ? "Chat deleted." : "Returned to the chat menu.");
         break;
       case "error":
-        if (data.threadId === threadRef.current && data.code === "turn_failed" &&
+        if (data.threadId === threadRef.current && (data.code === "turn_failed" || data.code === "thread_in_use") &&
             (!spokenReply.current || spokenReply.current.turnId === data.turnId)) {
           spokenReply.current = null;
           setThinking(false);
+          setTurnProgress("");
+          voice.stopReply();
+          if (data.code === "thread_in_use" && data.turnId) {
+            const rejected = messagesRef.current.find(message => message.role === "USER" && message.turnId === data.turnId);
+            if (rejected) {
+              messageRevision.current += 1;
+              updateMessages(previous => previous.filter(message => message !== rejected));
+              if (submittedTurn.current === data.turnId) {
+                setDraft(draft => draft ? `${rejected.text}\n\n${draft}` : rejected.text);
+              }
+            }
+          }
+          if (submittedTurn.current === data.turnId) submittedTurn.current = null;
         }
         setError(data.message ?? "The request failed.");
         break;
@@ -230,6 +272,11 @@ export default function App() {
       try {
         const event = JSON.parse(message.data) as ChatEvent;
         if (!Array.isArray(event.availableAction) || typeof event.type !== "string") throw new Error();
+        if (event.type !== "assistant.text.delta") {
+          const { threadId, turnId, codexTurnId, status, code, message: errorMessage } = event.data ?? {};
+          const detail = JSON.stringify({ turnId, codexTurnId, status, code, message: errorMessage });
+          logTraffic("Received", connection.url, threadId ?? threadRef.current, event.type, detail === "{}" ? undefined : detail);
+        }
         receive(event);
       } catch {
         setError("Could not read a response from Talia.");
@@ -238,9 +285,10 @@ export default function App() {
     connection.onerror = () => setError(`Could not connect to ${serverUrl.trim()}. Check the URL, server, and allowed origins.`);
     connection.onclose = () => {
       if (socket.current !== connection) return;
-      voice.stop();
+      voice.reset();
       spokenReply.current = null;
       setThinking(false);
+      setTurnProgress("");
       socket.current = null;
       threadRef.current = null;
       pendingRequest.current = null;
@@ -256,8 +304,6 @@ export default function App() {
       setCursor(undefined);
       updateMessages([]);
       setApprovals([]);
-      setModels([]);
-      setModel("");
       setNotice("");
     };
   }
@@ -265,17 +311,16 @@ export default function App() {
   function perform(action: Action, threadId?: string) {
     if (deletion.has(action) && !window.confirm("Permanently delete this conversation and its history?")) return;
     switch (action) {
-      case "startNewDialog": send({ type: "POST", action, ...(model.trim() ? { model: model.trim() } : {}) }); break;
+      case "startNewDialog": send({ type: "POST", action, model: defaultModel }); break;
       case "getDialogs": send({ type: "GET", action, limit }); break;
       case "getHistory": send({ type: "GET", action, limit }); break;
-      case "getModels": send({ type: "GET", action }); break;
       case "continueDialog": if (threadId) send({ type: "POST", action, threadId }); break;
       case "connectAsReader":
-      case "connectAsWriter": send({ type: "POST", action, ...(threadId ? { threadId } : {}) }); break;
-      case "changeModel":
-        if (model.trim()) send({ type: "POST", action, model: model.trim() });
-        else setError("Enter a model ID first.");
+      case "connectAsWriter": {
+        const target = threadId ?? selected;
+        send({ type: "POST", action, ...(target ? { threadId: target } : {}) });
         break;
+      }
       case "transferWriter":
         if (threadId?.trim()) send({ type: "POST", action, clientId: threadId.trim() });
         else setError("Choose or enter a connected client ID first.");
@@ -293,7 +338,8 @@ export default function App() {
 
   function submitMessage() {
     const text = draft.trim();
-    if (!text || !actions.includes("sendMessage")) return;
+    if (!text || !actions.includes("sendMessage") || pendingRequest.current || socket.current?.readyState !== WebSocket.OPEN) return;
+    voice.stopReply();
     send({ type: "POST", action: "sendMessage", text });
     setDraft("");
   }
@@ -336,7 +382,10 @@ export default function App() {
       <main className="main chat-layout">
         <header className="topbar">
           <div><span className="eyebrow">YOUR SPACE / CHAT</span><h1>{thread ? "Conversation" : "Chat workspace"}</h1></div>
-          <div className="top-status"><span className={`status-dot ${status}`} />{status === "connected" ? "Online" : status === "connecting" ? "Connecting" : "Offline"}</div>
+          <div className="topbar-actions">
+            <button type="button" className="tool-button" aria-expanded={logsOpen} onClick={() => setLogsOpen(value => !value)}>Logs</button>
+            <div className="top-status"><span className={`status-dot ${status}`} />{status === "connected" ? "Online" : status === "connecting" ? "Connecting" : "Offline"}</div>
+          </div>
         </header>
         <div className="workspace">
           <div className="conversation-header">
@@ -350,6 +399,7 @@ export default function App() {
             {messages.length === 0 ? <div className="empty-state"><div className="empty-icon">✳</div><span className="eyebrow">{thread ? "START THE CONVERSATION" : "WELCOME TO TALIA"}</span><h3>{thread ? "A fresh page." : "Good to see you here."}</h3><p>{thread ? "Your messages and replies will appear here." : "Your conversations live here. Connect to Talia to get started."}</p></div> :
               <div className="messages">{messages.map((message, index) => <article className={`message ${message.role === "USER" ? "user" : "assistant"}`} key={index}><div className="avatar">{message.role === "USER" ? "Y" : "✳"}</div><div className="message-content"><div className="message-label">{message.role === "USER" ? "YOU" : "TALIA"}</div><div className="bubble">{message.text}</div></div></article>)}<div ref={bottom} /></div>}
           </div>
+          {turnProgress && <p className="turn-progress" role="status">{turnProgress}</p>}
           {approvals.length > 0 && thread && <section aria-label="Pending Codex approvals" className="join-panel" style={{display:"grid",gap:12}}>
             {approvals.map(approval => <div key={approval.requestId} style={{display:"grid",gap:8}}>
               <strong>Codex requires your approval</strong>
@@ -369,23 +419,28 @@ export default function App() {
           {thread && <div className="toolbar">
             {available("getHistory") && <button className="tool-button" disabled={!!pending} onClick={() => perform("getHistory")}>↻ History</button>}
             {available("connectAsWriter") && <button className="tool-button" disabled={!!pending} onClick={() => perform("connectAsWriter")}>Become writer</button>}
-            {available("changeModel") && <ModelControl model={model} models={models} setModel={setModel} disabled={!!pending} onChange={() => perform("changeModel")} />}
+            <span className="role-badge">{activeModel}</span>
             {available("transferWriter") && <TransferControl participants={participants.filter(id => id !== clientId)} disabled={!!pending} onTransfer={id => perform("transferWriter", id)} />}
             {(["closeChat", "finishChat", "deleteChat", "closeChatAndDelete", "finishChatAndDelete"] as Action[]).filter(available).map(action => <button key={action} className={deletion.has(action) ? "tool-button danger-link" : "tool-button"} disabled={!!pending} onClick={() => perform(action)}>{labels[action]}</button>)}
           </div>}
-          {available("startNewDialog") && <div className="model-row"><label htmlFor="default-model">Model for new chat</label><select id="default-model" value={model} onChange={event => setModel(event.target.value)}><option value="">Server default</option>{models.map(id => <option key={id} value={id}>{id}</option>)}</select></div>}
-          {available("getModels") && <div className="model-row"><button className="text-button" disabled={!!pending} onClick={() => perform("getModels")}>↻ Refresh models</button></div>}
           <div className="composer"><textarea aria-label="Message" placeholder={thread ? available("sendMessage") ? "Write a message to Talia…" : "You’re connected as a reader or a response is in progress." : "Open a chat to start messaging…"} value={draft} disabled={!available("sendMessage") || !!pending} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitMessage(); } }} /><button aria-label="Send message" className="send-button" disabled={!available("sendMessage") || !draft.trim() || !!pending} onClick={submitMessage}>↑</button></div>
           <div className="composer-hint"><span>Enter to send · Shift + Enter for a new line</span><span>TALIA CHAT</span></div>
         </div>
-        <AvatarPanel thinking={thinking} chatNod={nod} voice={voice} />
+        <AvatarPanel thinking={thinking} addressed={addressed} voice={voice} />
       </main>
+      {logsOpen && <section className="traffic-panel" aria-label="Connection logs">
+        <header><strong>Connection logs</strong>
+          <button type="button" className="tool-button" disabled={!traffic.length} onClick={() => setTraffic([])}>Clear</button>
+          <button type="button" className="tool-button" onClick={() => setLogsOpen(false)}>Close</button>
+        </header>
+        {traffic.length ? <ol>{traffic.slice().reverse().map((entry, index) => <li key={index}>
+          <strong>{entry.time} · {entry.direction} · {entry.event}</strong>
+          <span>{entry.route}{entry.chat && ` · Chat ${entry.chat}`}</span>
+          {entry.detail && <pre>{entry.detail}</pre>}
+        </li>)}</ol> : <p>Connection activity will appear here.</p>}
+      </section>}
     </div>
   );
-}
-
-function ModelControl({ model, models, setModel, disabled, onChange }: { model: string; models: string[]; setModel: (value: string) => void; disabled: boolean; onChange: () => void }) {
-  return <div className="inline-control"><select aria-label="Model" value={model} onChange={event => setModel(event.target.value)}><option value="">Select model</option>{models.map(id => <option key={id} value={id}>{id}</option>)}</select><button className="tool-button" disabled={disabled || !model} onClick={onChange}>Change model</button></div>;
 }
 
 function TransferControl({ participants, disabled, onTransfer }: { participants: string[]; disabled: boolean; onTransfer: (id: string) => void }) {

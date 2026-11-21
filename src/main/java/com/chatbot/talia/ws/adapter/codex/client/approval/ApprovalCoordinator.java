@@ -7,8 +7,11 @@ import com.chatbot.talia.ws.adapter.codex.protocol.message.NotificationParams;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ApprovalDecisionResult;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.NotificationMethod;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.decoder.ServerRequestMethod;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,6 +23,7 @@ import java.util.function.Consumer;
  * Unrecognized requests are rejected rather than approved automatically.
  */
 public final class ApprovalCoordinator implements AutoCloseable {
+    private static final Logger log = LoggerFactory.getLogger(ApprovalCoordinator.class);
     private final CodexWebSocketClient client;
     private final Duration timeout;
     private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
@@ -63,13 +67,22 @@ public final class ApprovalCoordinator implements AutoCloseable {
         }
 
         ServerRequestMethod method = request.method();
+        CodexServerRequestParams params = request.params();
+        if (method == ServerRequestMethod.MCP_SERVER_ELICITATION_REQUEST) {
+            // Talia has no form or URL approval flow for MCP user input.
+            client.sendServerResult(request.id(), Map.of("action", "cancel"));
+            log.info("Canceled MCP input request: server={}, thread={}, turn={}",
+                    params == null ? null : params.serverName(),
+                    params == null ? null : params.threadId(),
+                    params == null ? null : params.turnId());
+            return;
+        }
         if (method != ServerRequestMethod.ITEM_COMMAND_EXECUTION_REQUEST_APPROVAL
                 && method != ServerRequestMethod.ITEM_FILE_CHANGE_REQUEST_APPROVAL) {
             client.sendServerError(request.id(), -32601, "Unsupported server request: " + request.wireMethod());
             return;
         }
 
-        CodexServerRequestParams params = request.params();
         if (params == null || params.threadId() == null || params.threadId().isBlank()) {
             client.sendServerError(request.id(), -32602, "Missing approval threadId");
             return;

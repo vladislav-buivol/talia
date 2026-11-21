@@ -42,6 +42,31 @@ class CodexTurnCancellationTests {
     }
 
     @Test
+    void commentaryIsDeliveredBeforeTheFinalAnswerWithoutRepeatingItsDeltas() {
+        var answer = new StringBuilder();
+        var progress = new StringBuilder();
+        CodexTurn turn = new CodexTurn(answer::append, progress::append, 8, Duration.ofSeconds(30),
+                id -> CompletableFuture.completedFuture(null));
+        turn.onNotification(notification(NotificationMethod.ITEM_STARTED, "item/started", """
+                {"threadId":"thread","turnId":"turn","item":{"id":"status","type":"agentMessage","phase":"commentary","text":""}}
+                """));
+        turn.onNotification(notification(NotificationMethod.ITEM_AGENT_MESSAGE_DELTA, "item/agentMessage/delta", """
+                {"threadId":"thread","turnId":"turn","itemId":"status","delta":"Checking the forecast."}
+                """));
+        turn.startRequest().future().complete(new TurnStartResponse(1L,
+                new TurnStartResponse.Result(new TurnStartResponse.TurnInfo("turn", "inProgress"))));
+        turn.onNotification(notification(NotificationMethod.ITEM_COMPLETED, "item/completed", """
+                {"threadId":"thread","turnId":"turn","item":{"id":"status","type":"agentMessage","phase":"commentary","text":"Checking the forecast."}}
+                """));
+        assertEquals("Checking the forecast.", progress.toString());
+        assertFalse(turn.result().isDone());
+        turn.onNotification(notification(NotificationMethod.ITEM_AGENT_MESSAGE_DELTA, "item/agentMessage/delta", """
+                {"threadId":"thread","turnId":"turn","itemId":"answer","delta":"It will be cloudy."}
+                """));
+        assertEquals("It will be cloudy.", answer.toString());
+    }
+
+    @Test
     void terminalNotificationBeforeStartReplyIsReplayed() {
         CodexTurn turn = new CodexTurn(text -> {}, 4, Duration.ofSeconds(30),
                 id -> CompletableFuture.completedFuture(null));

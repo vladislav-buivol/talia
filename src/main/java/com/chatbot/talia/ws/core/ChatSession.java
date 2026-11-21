@@ -56,6 +56,7 @@ final class ChatSession {
         send(peer, event("session.joined")
                 .put("clientId", peer.id())
                 .put("writerId", writerId)
+                .put("model", model)
                 .put("turnId", activeTurn));
         broadcastSessionState(peer);
         return true;
@@ -243,10 +244,14 @@ final class ChatSession {
     private void runTurn(String turnId, String text, String selectedModel) {
         try {
             Consumer<String> stream = delta -> broadcast(event("assistant.text.delta").put("turnId", turnId).put("text", delta));
-            ChatBackend.TurnResult result = conversation.runTurn(text, selectedModel, stream);
+            Consumer<String> progress = update -> broadcast(event("assistant.progress").put("turnId", turnId).put("text", update));
+            ChatBackend.TurnResult result = conversation.runTurn(text, selectedModel, stream, progress);
             completeTurn(turnId, event("assistant.text.done").put("turnId", turnId)
                     .put("codexTurnId", result.turnId()).put("status", result.status())
                     .put("errorMessage", result.errorMessage()));
+        } catch (ChatBackend.ThreadWriteConflict error) {
+            completeTurn(turnId, event("error").put("turnId", turnId).put("code", "thread_in_use")
+                    .put("message", error.getMessage()));
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             failTurn(turnId, error);

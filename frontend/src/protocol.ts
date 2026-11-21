@@ -37,6 +37,7 @@ export interface ChatEvent {
     joinedClientId?: string;
     leftClientId?: string;
     turnId?: string | null;
+    codexTurnId?: string | null;
     text?: string;
     status?: string;
     errorMessage?: string | null;

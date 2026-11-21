@@ -97,14 +97,17 @@ public final class CodexMessageDispatcher {
 
     private void dispatchTurnNotification(CodexMessageCodec.Notification notification) {
         NotificationMethod method = notification.method();
-        if (method != NotificationMethod.ITEM_AGENT_MESSAGE_DELTA && method != NotificationMethod.TURN_COMPLETED) {
+        var params = notification.params();
+        if (params == null || params.threadId() == null) {
             return;
         }
-        if (notification.params() == null || notification.params().threadId() == null) {
+        boolean commentary = (method == NotificationMethod.ITEM_STARTED || method == NotificationMethod.ITEM_COMPLETED)
+                && params.item() != null && params.item().isCommentary();
+        if (!commentary && method != NotificationMethod.ITEM_AGENT_MESSAGE_DELTA && method != NotificationMethod.TURN_COMPLETED) {
             return;
         }
 
-        CodexTurn turn = turns.get(notification.params().threadId());
+        CodexTurn turn = turns.get(params.threadId());
         if (turn != null) {
             turn.onNotification(notification);
         }

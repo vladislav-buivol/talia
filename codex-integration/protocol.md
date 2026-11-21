@@ -64,7 +64,7 @@ The responses below illustrate one possible state. The actual action list reflec
 
 ### startNewDialog
 
-Create a thread and join as writer. `model` is optional. If omitted, Codex chooses its default. The current adapter accepts `gpt-5.6-luna` and `gpt-5.6-sol`.
+Create a thread and join as writer. `model` is optional and defaults to `gpt-5.6-luna`. The current adapter also accepts `gpt-5.6-sol` as an explicit override.
 
 ```json
 {"type":"POST","action":"startNewDialog","model":"gpt-5.6-luna"}
@@ -148,6 +148,8 @@ Read the most recent messages in chronological order. `limit` is optional, defau
 
 The writer sends a nonblank message. The resulting `user.text`, `assistant.text.delta`, and terminal events are broadcast to participants. The server-generated `turnId` links events for this turn.
 
+Completed Codex commentary messages arrive as `assistant.progress` with the same `threadId`, `turnId` and a `text` field. The final answer streams as `assistant.text.delta`.
+
 ```json
 {"type":"POST","action":"sendMessage","text":"Hello"}
 ```
@@ -160,6 +162,8 @@ The writer sends a nonblank message. The resulting `user.text`, `assistant.text.
 ```
 
 The terminal status comes from Codex. A turn can complete with a failed or interrupted status. A request or connection failure produces an `error` event with code `turn_failed`.
+
+If another Codex session holds the writer, Talia sends `thread_in_use` with the rejected `turnId`. The message can be sent again in the same chat after the other session releases it.
 
 ### changeModel
 

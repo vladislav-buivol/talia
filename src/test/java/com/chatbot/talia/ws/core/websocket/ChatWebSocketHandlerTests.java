@@ -4,6 +4,7 @@ import com.chatbot.talia.ws.adapter.codex.CodexChatBackend;
 import com.chatbot.talia.ws.adapter.codex.client.CodexClient;
 import com.chatbot.talia.ws.adapter.codex.client.CodexTurnResult;
 import com.chatbot.talia.ws.adapter.codex.client.ConversationHistory;
+import com.chatbot.talia.ws.adapter.codex.client.rpc.CodexRpcException;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.CodexModel;
 import com.chatbot.talia.ws.adapter.codex.protocol.request.InitializeRequest.ClientInfo;
 import com.chatbot.talia.ws.adapter.codex.protocol.response.ThreadDeleteResponse;
@@ -47,6 +48,7 @@ class ChatWebSocketHandlerTests {
         when(codex.connect(CLIENT_INFO.name(), CLIENT_INFO.title(), CLIENT_INFO.version()))
                 .thenReturn(CompletableFuture.completedFuture(null));
         when(codex.resumeConversation("thread-1")).thenReturn(CompletableFuture.completedFuture("thread-1"));
+        when(codex.finishConversation("thread-1")).thenReturn(CompletableFuture.completedFuture("unsubscribed"));
         when(codex.listConversations(2, null)).thenReturn(CompletableFuture.completedFuture(
                 new CodexClient.ConversationPage(List.of(
                         new CodexClient.ConversationSummary("thread-1", "Saved chat", "Saved message", null)), null)));
@@ -54,12 +56,14 @@ class ChatWebSocketHandlerTests {
                 .thenReturn(new ConversationHistory("thread-1",
                         List.of(new ConversationHistory.Message(ConversationHistory.Role.USER, "Saved message", null))));
         CompletableFuture<Consumer<String>> streaming = new CompletableFuture<>();
+        CompletableFuture<Consumer<String>> progress = new CompletableFuture<>();
         CompletableFuture<CodexTurnResult> active = new CompletableFuture<>();
-        when(codex.runTurn(eq("thread-1"), eq("First"), any())).thenAnswer(invocation -> {
-            streaming.complete(invocation.getArgument(2, Consumer.class));
+        when(codex.runTurn(eq("thread-1"), eq("First"), eq(CodexModel.GPT_5_6_LUNA), any(), any())).thenAnswer(invocation -> {
+            streaming.complete(invocation.getArgument(3, Consumer.class));
+            progress.complete(invocation.getArgument(4, Consumer.class));
             return active;
         });
-        when(codex.runTurn(eq("thread-1"), eq("Second"), eq(CodexModel.GPT_5_6_SOL), any()))
+        when(codex.runTurn(eq("thread-1"), eq("Second"), eq(CodexModel.GPT_5_6_SOL), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(new CodexTurnResult("turn-2", "completed", null)));
 
         ChatWebSocketHandler handler = new ChatWebSocketHandler(mapper,
@@ -103,7 +107,7 @@ class ChatWebSocketHandlerTests {
             assertEquals("gpt-5.6-sol", reader.next("models").path("models").path(1).asString());
             reader.send(handler, new SendMessageRequest("Blocked"));
             assertEquals("read_only", reader.next("error").path("code").asString());
-            verify(codex, never()).runTurn(eq("thread-1"), eq("Blocked"), any());
+            verify(codex, never()).runTurn(eq("thread-1"), eq("Blocked"), any(CodexModel.class), any(), any());
 
             writer.send(handler, new SendMessageRequest("First"));
             String turnId = writer.next("user.text").path("turnId").asString();
@@ -115,6 +119,9 @@ class ChatWebSocketHandlerTests {
             reader.send(handler, new SendMessageRequest("Second"));
             assertEquals("turn_in_progress", reader.next("error").path("code").asString());
 
+            progress.get(5, TimeUnit.SECONDS).accept("Checking the forecast.");
+            assertEquals("Checking the forecast.", writer.next("assistant.progress").path("text").asString());
+            assertEquals(turnId, reader.next("assistant.progress").path("turnId").asString());
             delta.accept("Still streaming");
             assertEquals("Still streaming", writer.next("assistant.text.delta").path("text").asString());
             assertEquals("Still streaming", reader.next("assistant.text.delta").path("text").asString());
@@ -182,12 +189,47 @@ class ChatWebSocketHandlerTests {
     }
 
     @Test
+    void reportsExternalWriterAndAllowsRetryOnTheSameThread() throws Exception {
+        CodexClient codex = mock(CodexClient.class);
+        when(codex.connect(CLIENT_INFO.name(), CLIENT_INFO.title(), CLIENT_INFO.version()))
+                .thenReturn(CompletableFuture.completedFuture(null));
+        when(codex.resumeConversation("locked-thread")).thenReturn(
+                CompletableFuture.failedFuture(new CodexRpcException(-32600,
+                        "thread locked-thread already has an active writer", null, "thread/resume")),
+                CompletableFuture.completedFuture("locked-thread"));
+        when(codex.runTurn(eq("locked-thread"), eq("Hello"), eq(CodexModel.GPT_5_6_LUNA), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(new CodexTurnResult("turn", "completed", null)));
+        when(codex.finishConversation("locked-thread")).thenReturn(CompletableFuture.completedFuture("unsubscribed"));
+
+        try (var handler = new ChatWebSocketHandler(mapper, new ChatService(mapper, new CodexChatBackend(() -> codex, CLIENT_INFO)))) {
+            Peer writer = new Peer("writer");
+            handler.afterConnectionEstablished(writer.socket);
+            writer.next("connected");
+            writer.send(handler, new ConnectAsWriterRequest("locked-thread"));
+            writer.next("session.joined");
+
+            writer.send(handler, new SendMessageRequest("Hello"));
+            String failedTurn = writer.next("user.text").path("turnId").asString();
+            JsonNode error = writer.next("error");
+            assertEquals("thread_in_use", error.path("code").asString());
+            assertEquals(failedTurn, error.path("turnId").asString());
+            verify(codex, never()).runTurn(eq("locked-thread"), eq("Hello"), eq(CodexModel.GPT_5_6_LUNA), any(), any());
+
+            writer.send(handler, new SendMessageRequest("Hello"));
+            writer.next("user.text");
+            assertEquals("completed", writer.next("assistant.text.done").path("status").asString());
+            verify(codex).runTurn(eq("locked-thread"), eq("Hello"), eq(CodexModel.GPT_5_6_LUNA), any(), any());
+        }
+    }
+
+    @Test
     void startsAndWritesToNewDialogWithoutKnowingItsId() throws Exception {
         CodexClient codex = mock(CodexClient.class);
         when(codex.connect(CLIENT_INFO.name(), CLIENT_INFO.title(), CLIENT_INFO.version()))
                 .thenReturn(CompletableFuture.completedFuture(null));
         when(codex.startConversation(CodexModel.GPT_5_6_SOL)).thenReturn(CompletableFuture.completedFuture("new-thread"));
-        when(codex.runTurn(eq("new-thread"), eq("Hello"), eq(CodexModel.GPT_5_6_SOL), any()))
+        when(codex.finishConversation("new-thread")).thenReturn(CompletableFuture.completedFuture("unsubscribed"));
+        when(codex.runTurn(eq("new-thread"), eq("Hello"), eq(CodexModel.GPT_5_6_SOL), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(new CodexTurnResult("turn", "completed", null)));
         ChatWebSocketHandler handler = new ChatWebSocketHandler(mapper,
                 new ChatService(mapper, new CodexChatBackend(() -> codex, CLIENT_INFO)));

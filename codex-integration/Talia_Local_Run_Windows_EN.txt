@@ -13,7 +13,8 @@ REQUIREMENTS (install once)
 - Codex authentication: codex login
 - Conda environment named "omnivoice" with OmniVoice, PyTorch, SoundFile,
   FastAPI and Uvicorn installed (per the project frontend README)
-- Local TTS voice references: voice.wav and tts/voice.txt
+- Default TTS voice reference: voxCPM/voxCPM_cfg_2_locDit_50_seed_1170577108.wav
+  with its transcript in tts/voice.txt
 - Maven installation is NOT required: the repository contains mvnw.cmd
 
 GET PROJECT (first time only)
@@ -42,8 +43,7 @@ OPEN UI
 1. Open http://localhost:5173 (the URL printed by Vite).
 2. Click "Connect to Talia".
 3. Confirm the WebSocket URL: ws://localhost:8080/ws/chat
-4. Click "Enable voice" in the Talia avatar panel.
-5. Chat normally; TTS replies use the running OmniVoice service.
+4. Chat normally. Voice is on by default and uses the running OmniVoice service.
 
 LOCAL PORTS
 -----------

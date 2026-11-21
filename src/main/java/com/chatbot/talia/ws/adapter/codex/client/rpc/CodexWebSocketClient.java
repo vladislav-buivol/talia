@@ -178,6 +178,10 @@ public class CodexWebSocketClient implements AutoCloseable {
 
     /** Streams text on the WebSocket listener thread and returns the server's terminal turn outcome. */
     public CompletableFuture<CodexTurnResult> runTurn(TurnStartRequest request, Consumer<String> onText) {
+        return runTurn(request, onText, null);
+    }
+
+    public CompletableFuture<CodexTurnResult> runTurn(TurnStartRequest request, Consumer<String> onText, Consumer<String> onProgress) {
         Throwable failure = checkReady();
         if (failure != null) {
             return CompletableFuture.failedFuture(failure);
@@ -185,7 +189,7 @@ public class CodexWebSocketClient implements AutoCloseable {
 
         String threadId = request.params().threadId();
         CodexTurn turn = new CodexTurn(
-                onText,
+                onText, onProgress,
                 settings.maxEarlyNotifications(),
                 settings.turnStartTimeout(),
                 id -> send(TurnInterruptRequest.create(threadId, id), TurnInterruptResponse.class)

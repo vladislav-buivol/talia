@@ -1,12 +1,16 @@
 type Playback = {
-  request: AbortController;
-  source?: AudioBufferSourceNode;
-  analyser?: AnalyserNode;
+  source: AudioBufferSourceNode;
+  analyser: AnalyserNode;
+  startedAt: number;
+  offset: number;
+  rate: number;
+  finish: (completed: boolean) => void;
 };
 
 export class AudioPlayback {
   readonly analyser = { current: null as AnalyserNode | null };
   private context?: AudioContext;
+  private request?: AbortController;
   private current?: Playback;
 
   async enable() {
@@ -18,56 +22,70 @@ export class AudioPlayback {
 
   begin() {
     this.stop();
-    const request = new AbortController();
-    this.current = { request };
-    return request.signal;
+    this.request = new AbortController();
+    return this.request.signal;
   }
 
-  async play(data: ArrayBuffer, signal: AbortSignal, onEnd: () => void) {
-    const audio = this.context;
+  async decode(data: ArrayBuffer) {
+    if (!this.context) throw new Error("Audio is disabled");
+    return this.context.decodeAudioData(data);
+  }
+
+  position() {
     const playback = this.current;
-    if (signal.aborted || !audio || playback?.request.signal !== signal) return false;
-    const buffer = await audio.decodeAudioData(data);
-    if (this.current !== playback) return false;
+    const audio = this.context;
+    if (!playback || !audio) return 0;
+    const output = audio.getOutputTimestamp?.();
+    const clock = output?.performanceTime ? output.contextTime ?? audio.currentTime : audio.currentTime;
+    return playback.offset + Math.max(0, Math.min(
+      (clock - playback.startedAt) * playback.rate, (playback.source.buffer?.duration ?? 0) - playback.offset,
+    ));
+  }
+
+  play(buffer: AudioBuffer, signal: AbortSignal, offset = 0, rate = 1): Promise<boolean> {
+    const audio = this.context;
+    if (!audio || signal.aborted || this.request?.signal !== signal) return Promise.resolve(false);
+    if (offset >= buffer.duration) return Promise.resolve(true);
 
     const source = audio.createBufferSource();
     const analyser = audio.createAnalyser();
     analyser.fftSize = 2048;
     source.buffer = buffer;
+    source.playbackRate.value = rate;
     source.connect(analyser);
     analyser.connect(audio.destination);
-    playback.analyser = analyser;
-    source.onended = () => {
-      source.disconnect();
-      analyser.disconnect();
-      if (this.current !== playback) return;
-      this.current = undefined;
-      this.analyser.current = null;
-      onEnd();
-    };
-    try {
-      source.start();
-    } catch (error) {
-      source.disconnect();
-      throw error;
-    }
-    playback.source = source;
-    this.analyser.current = analyser;
-    return true;
+    return new Promise((resolve, reject) => {
+      const finish = (completed: boolean) => {
+        source.onended = null;
+        source.disconnect();
+        analyser.disconnect();
+        this.current = undefined;
+        this.analyser.current = null;
+        resolve(completed);
+      };
+      const startedAt = audio.currentTime;
+      source.onended = () => finish(true);
+      try {
+        source.start(startedAt, offset);
+        this.current = { source, analyser, startedAt, offset, rate, finish };
+        this.analyser.current = analyser;
+      } catch (error) {
+        source.onended = null;
+        source.disconnect();
+        analyser.disconnect();
+        reject(error);
+      }
+    });
   }
 
   stop() {
+    this.request?.abort();
+    this.request = undefined;
     const playback = this.current;
-    this.current = undefined;
-    this.analyser.current = null;
-    if (!playback) return;
-    playback.request.abort();
-    if (playback.source) {
-      playback.source.onended = null;
+    if (playback) {
       playback.source.stop();
-      playback.source.disconnect();
+      playback.finish(false);
     }
-    playback.analyser?.disconnect();
   }
 
   dispose() {

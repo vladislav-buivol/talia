@@ -170,7 +170,8 @@ public class CodexMessageCodec {
         if (params != null && params.isObject()) {
             JsonNode itemNode = params.get("item");
             if (itemNode != null && itemNode.isObject()) {
-                item = new NotificationParams.Item(optionalString(itemNode, "type"));
+                item = new NotificationParams.Item(optionalString(itemNode, "type"), optionalString(itemNode, "id"),
+                        optionalString(itemNode, "phase"), optionalString(itemNode, "text"));
             }
 
             JsonNode turnNode = params.get("turn");
@@ -191,6 +192,7 @@ public class CodexMessageCodec {
                 : new NotificationParams(
                         optionalString(params, "threadId"),
                         optionalString(params, "turnId"),
+                        optionalString(params, "itemId"),
                         optionalString(params, "delta"),
                         item,
                         turn,
@@ -212,7 +214,8 @@ public class CodexMessageCodec {
                         optionalString(params, "itemId"),
                         optionalString(params, "reason"),
                         optionalString(params, "command"),
-                        optionalString(params, "cwd"));
+                        optionalString(params, "cwd"),
+                        optionalString(params, "serverName"));
 
         return new ServerRequest(requestId, ServerRequestMethod.fromWireName(method), method, payload);
     }

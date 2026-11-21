@@ -27,6 +27,13 @@ public interface ChatBackend {
     record TurnResult(String turnId, String status, String errorMessage) {
     }
 
+    /** The upstream session rejected the writer before the message was submitted. */
+    final class ThreadWriteConflict extends RuntimeException {
+        public ThreadWriteConflict(Throwable cause) {
+            super("This chat is open for writing in another Codex session. Close it there, then try sending again.", cause);
+        }
+    }
+
     interface Conversation extends AutoCloseable {
         String threadId();
 
@@ -34,6 +41,11 @@ public interface ChatBackend {
 
         TurnResult runTurn(String text, String model, Consumer<String> onText)
                 throws InterruptedException, ExecutionException;
+
+        default TurnResult runTurn(String text, String model, Consumer<String> onText, Consumer<String> onProgress)
+                throws InterruptedException, ExecutionException {
+            return runTurn(text, model, onText);
+        }
 
         void delete() throws InterruptedException, ExecutionException;
 

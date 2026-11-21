@@ -123,6 +123,11 @@ public class CodexClient implements AutoCloseable {
         return rpc.runTurn(TurnStartRequest.withModel(threadId, prompt, model), onText);
     }
 
+    public CompletableFuture<CodexTurnResult> runTurn(String threadId, String prompt, CodexModel model,
+                                                    Consumer<String> onText, Consumer<String> onProgress) {
+        return rpc.runTurn(TurnStartRequest.withModel(threadId, prompt, model), onText, onProgress);
+    }
+
     public ConversationHistory openConversation(String threadId, int messageLimit, ConversationHistory.Order order)
             throws InterruptedException, ExecutionException {
         Objects.requireNonNull(order);

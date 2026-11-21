@@ -6,11 +6,13 @@ import { AvatarMotionController, type AvatarMode } from "./AvatarMotionControlle
 import { AvatarScene } from "./AvatarScene";
 import { createTaliaDance } from "./TaliaDance";
 import { VrmAssetLoader } from "./VrmAssetLoader";
+import type { SpeechSegment } from "../voice/SpeechClient";
 
 type AvatarProps = {
   mode: AvatarMode;
   nod: number;
   analyser: RefObject<AnalyserNode | null>;
+  reaction: SpeechSegment | null;
   motionRequest: { motion: AvatarMotion } | null;
   onMotionEnd: () => void;
 };
@@ -20,9 +22,10 @@ type AvatarRuntime = {
   loader: VrmAssetLoader;
   model: VRM;
   controller: AvatarMotionController;
+  face: AvatarFace;
 };
 
-export default function TaliaAvatar({ mode, nod, analyser, motionRequest, onMotionEnd }: AvatarProps) {
+export default function TaliaAvatar({ mode, nod, analyser, reaction, motionRequest, onMotionEnd }: AvatarProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const runtime = useRef<AvatarRuntime | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
@@ -54,15 +57,15 @@ export default function TaliaAvatar({ mode, nod, analyser, motionRequest, onMoti
       const face = new AvatarFace(avatar.expressionManager);
       avatar.update(0);
       scene.attach(avatar);
-      runtime.current = { scene, loader, model: avatar, controller };
-      let previous = performance.now();
+      runtime.current = { scene, loader, model: avatar, controller, face };
+      let previous: number | undefined;
       scene.start(now => {
-        const dt = Math.min(Math.max((now - previous) / 1000, 0), 0.05);
+        const dt = Math.min(Math.max((now - (previous ?? now)) / 1000, 0), 0.05);
         previous = now;
         if (controller.update(dt)) onMotionEnd();
         face.update(dt, analyser.current);
         avatar.update(dt);
-        face.restoreAnimatedMouth();
+        face.restoreAnimatedExpressions();
       });
       setStatus("ready");
       void loader.loadMotion(defaultAnimationPath, avatar, loading.signal)
@@ -96,6 +99,13 @@ export default function TaliaAvatar({ mode, nod, analyser, motionRequest, onMoti
   useEffect(() => {
     if (nod) runtime.current?.controller.nod();
   }, [nod, status]);
+
+  useEffect(() => {
+    const avatar = runtime.current;
+    if (!avatar) return;
+    avatar.face.emotion = reaction?.emotion ?? "neutral";
+    avatar.controller.react(reaction?.motion ?? "none");
+  }, [reaction, status]);
 
   useEffect(() => {
     const avatar = runtime.current;
