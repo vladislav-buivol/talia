@@ -13,7 +13,7 @@ REQUIREMENTS (install once)
 - Codex authentication: codex login
 - Conda environment named "omnivoice" with OmniVoice, PyTorch, SoundFile,
   FastAPI and Uvicorn installed (per the project frontend README)
-- Default TTS voice reference: voxCPM/voxCPM_cfg_2_locDit_50_seed_1170577108.wav
+- Default TTS voice reference: voxCPM/default_voice.wav.wav
   with its transcript in tts/voice.txt
 - Maven installation is NOT required: the repository contains mvnw.cmd
 

@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
     project_dir = Path(__file__).resolve().parent.parent
     synthesizer = SpeechSynthesizer(
         environ.get("TALIA_TTS_MODEL", "k2-fsa/OmniVoice"),
-        project_dir / "voxCPM" / "voxCPM_cfg_2_locDit_50_seed_1170577108.wav",
+        project_dir / "voxCPM" / "default_voice.wav",
         project_dir / "tts" / "voice.txt",
     )
     audio = environ.get("TALIA_VOICE_AUDIO")
